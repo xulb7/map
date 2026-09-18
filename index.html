@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>خريطة الكلية التقنية للبنات بالزلفي</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <!-- أزرار التحكم بالتكبير والتصغير والسحب -->
+  <div class="zoom-controls">
+    <button onclick="zoomIn()" title="تكبير"><i class="fas fa-plus"></i></button>
+    <button onclick="resetZoom()" title="إعادة ضبط"><i class="fas fa-compress-arrows-alt"></i></button>
+    <button onclick="zoomOut()" title="تصغير"><i class="fas fa-minus"></i></button>
+  </div>
+
+  <!-- الشريط العلوي للتحكم -->
+  <header class="top-controls" id="topControls">
+    <button class="toggle-btn" onclick="toggleHeader()" title="طوي/إظهار الشريط">
+      <i class="fas fa-chevron-up" id="toggleIcon"></i>
+    </button>
+    
+    <div class="brand-title">
+      <h2>مَسَار | الكلية التقنية للبنات بالزلفي</h2>
+    </div>
+
+    <!-- اختيارات المبنى -->
+    <div class="btn-group">
+      <button id="bldg-A" class="tab-btn active" onclick="selectBuilding('A')">مبنى A</button>
+      <button id="bldg-B" class="tab-btn" onclick="selectBuilding('B')">مبنى B</button>
+    </div>
+
+    <!-- اختيارات الأدوار -->
+    <div class="btn-group" id="floorSelector"></div>
+
+    <!-- قائمة القاعات -->
+    <div class="search-select">
+      <select id="roomDropdown" onchange="highlightAndRoute()">
+        <option value="">اختر القاعة...</option>
+      </select>
+    </div>
+
+    <button class="qr-btn" onclick="openQrModal()">
+      <i class="fas fa-qrcode"></i> الباركود
+    </button>
+  </header>
+
+  <!-- مساحة الخريطة مع إمكانية السحب والتكبير -->
+  <main class="map-wrapper" id="mapWrapper">
+    <div class="blueprint-board" id="blueprintBoard">
+      <!-- ممرات المباني SVG -->
+      <svg id="corridorSvg" class="svg-layer" viewBox="0 0 1000 750"></svg>
+
+      <!-- القاعات والمكاتب -->
+      <div id="roomsContainer"></div>
+
+      <!-- مسارات التوجيه المتناسبة مع الممرات -->
+      <svg id="navigationSvg" class="svg-layer" viewBox="0 0 1000 750">
+        <path id="routePath" d="" stroke="#10b981" stroke-width="6" stroke-dasharray="10 6" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+        <g id="liveMarker" style="display:none;">
+          <circle id="markerCircle" r="14" fill="#10b981" stroke="#ffffff" stroke-width="3" />
+          <circle r="24" fill="rgba(16, 185, 129, 0.4)" class="ping-ring" />
+        </g>
+      </svg>
+    </div>
+  </main>
+
+  <!-- شريط التوجيه السفلي -->
+  <div id="infoBanner" class="info-banner" style="display:none;">
+    <span id="infoText">جاري التوجيه...</span>
+    <button onclick="clearNavigation()" class="clear-btn">إنهاء التوجيه</button>
+  </div>
+
+  <!-- نافذة شرح وطريقة تطبيق الباركود -->
+  <div id="qrModal" class="modal-overlay">
+    <div class="modal-content">
+      <h3>شرح وتطبيق نظام الباركود (QR Code)</h3>
+      <p class="modal-desc">
+        آلية العمل: يتم طباعة ملصق QR كود ولصقه عند بوابة كل مبنى أو عند السلالم. عند مسح الكود بجمال الجوال، يتم فتح الخريطة تلقائياً مع تحديد القاعة أو الدور مباشرة بدون الحاجة للبحث.
+      </p>
+
+      <div class="qr-preview-box">
+        <div class="qr-card">
+          <h4>مثال: ملصق مدخل مبنى B</h4>
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://example.com/?bldg=B&floor=Ground&room=B-G-11" alt="QR Example">
+          <code>?bldg=B&floor=Ground&room=B-G-11</code>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button onclick="testQrScan('B', 'الدور الأرضي', 'B-G-11')" class="test-btn">تجربة مسح باركود القاعة B-G-11</button>
+        <button onclick="closeQrModal()" class="close-btn">إغلاق Window</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
