@@ -348,6 +348,7 @@ function initPanZoom() {
   };
 
   window.addEventListener('orientationchange', () => setTimeout(fitToScreen, 300));
+  window.addEventListener('resize', () => updateTransform());
 }
 
 function setupBoard() {
@@ -371,6 +372,7 @@ function zoomAt(cx, cy, factor) {
 }
 
 function updateTransform() {
+  clampPan();
   board.style.transform = `translate(${pointX}px, ${pointY}px) scale(${scale})`;
 }
 
@@ -386,30 +388,63 @@ function resetZoom() {
   fitToScreen();
 }
 
-function fitToScreen() {
-  setupBoard();
+// حدود محتوى الدور الحالي (القاعات + الممرات) لتوسيط الخريطة ومنع السحب للفراغ
+let viewBounds = null;
+
+function computeBounds() {
   const rooms = campusData[selectedBldg][selectedFloor].rooms;
-  let maxX = 0, maxY = 0;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   rooms.forEach(r => {
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
     maxX = Math.max(maxX, r.x + r.w);
     maxY = Math.max(maxY, r.y + r.h);
   });
-  maxX += 40;
-  maxY += 40;
+  try {
+    const bb = document.getElementById('corridorSvg').getBBox();
+    if (bb && bb.width > 0 && bb.height > 0) {
+      minX = Math.min(minX, bb.x);
+      minY = Math.min(minY, bb.y);
+      maxX = Math.max(maxX, bb.x + bb.width);
+      maxY = Math.max(maxY, bb.y + bb.height);
+    }
+  } catch (err) {}
+  const pad = 16;
+  return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad };
+}
 
+function viewMetrics() {
   const header = document.getElementById('topControls');
   let topPad = 0;
   if (header) {
     const pos = getComputedStyle(header).position;
     if (pos === 'absolute' || pos === 'fixed') topPad = header.offsetHeight + 10;
   }
+  return { w: wrapper.clientWidth, h: wrapper.clientHeight, topPad };
+}
 
-  const w = wrapper.clientWidth;
-  const h = wrapper.clientHeight - topPad;
-  scale = Math.min(w / maxX, h / maxY, 1);
-  scale = Math.max(scale, 0.25);
-  pointX = (w - maxX * scale) / 2;
-  pointY = topPad + (h - maxY * scale) / 2;
+// تثبيت الخريطة داخل الشاشة: إن كانت أصغر من الشاشة تتوسّط وتثبت، وإن كانت مكبّرة لا تخرج حوافها للفراغ
+function clampPan() {
+  const b = viewBounds, v = viewMetrics();
+  if (!b || !v.w || !v.h) return;
+  const cw = (b.maxX - b.minX) * scale, ch = (b.maxY - b.minY) * scale;
+  const availH = v.h - v.topPad;
+  if (cw <= v.w) pointX = (v.w - cw) / 2 - b.minX * scale;
+  else pointX = Math.min(-b.minX * scale, Math.max(v.w - b.maxX * scale, pointX));
+  if (ch <= availH) pointY = v.topPad + (availH - ch) / 2 - b.minY * scale;
+  else pointY = Math.min(v.topPad - b.minY * scale, Math.max(v.h - b.maxY * scale, pointY));
+}
+
+function fitToScreen() {
+  setupBoard();
+  viewBounds = computeBounds();
+  const v = viewMetrics();
+  const bw = viewBounds.maxX - viewBounds.minX;
+  const bh = viewBounds.maxY - viewBounds.minY;
+  const availH = v.h - v.topPad;
+  scale = Math.max(Math.min(v.w / bw, availH / bh, 1), 0.25);
+  pointX = (v.w - bw * scale) / 2 - viewBounds.minX * scale;
+  pointY = v.topPad + (availH - bh * scale) / 2 - viewBounds.minY * scale;
   updateTransform();
 }
 

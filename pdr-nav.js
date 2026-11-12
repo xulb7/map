@@ -149,7 +149,7 @@
   }
 
   function onStep() {
-    if (!pos || !posCtx) { hint('امسح QR لتحديد موقعك أولاً'); return; }
+    if (!pos || !posCtx) { hint('امسح QR (📷) لتحديد موقعك أولاً'); return; }
     if (devHeading == null) { hint('بانتظار قراءة البوصلة… حرّك الجوال حركة رقم 8'); return; }
     steps++;
     // التتبع يستمر على دور/مبنى المستخدم حتى لو كان يتصفح خريطة غيره
@@ -160,7 +160,7 @@
     } else {
       hint('موقعك مسجّل في مبنى ' + posCtx.b + ' — ' + posCtx.f + '. إذا انتقلت لدور أو مبنى آخر امسح QR هناك لتحديث موقعك');
     }
-    if (stepsEl) stepsEl.textContent = 'الخطوات: ' + steps;
+    if (stepsEl) stepsEl.textContent = '👣 ' + steps;
   }
 
   /* ---------- المسار من الموقع الحالي ---------- */
@@ -331,7 +331,7 @@
       removeEventListener('devicemotion', onMotion);
       removeEventListener('deviceorientation', onOri, true);
       removeEventListener('deviceorientationabsolute', onOri, true);
-      tracking = false; trackBtn.classList.remove('on'); trackBtn.textContent = '📍 تفعيل التتبع';
+      tracking = false; trackBtn.classList.remove('on'); trackBtn.textContent = '📍'; trackBtn.title = 'تفعيل التتبع';
       return;
     }
     try {
@@ -347,8 +347,8 @@
     addEventListener('devicemotion', onMotion);
     addEventListener('deviceorientation', onOri, true);
     addEventListener('deviceorientationabsolute', onOri, true);
-    tracking = true; trackBtn.classList.add('on'); trackBtn.textContent = '⏹ إيقاف التتبع';
-    toast(pos ? 'ابدأ المشي' : 'امسح QR لتحديد موقعك أولاً');
+    tracking = true; trackBtn.classList.add('on'); trackBtn.textContent = '⏹'; trackBtn.title = 'إيقاف التتبع';
+    toast(pos ? 'ابدأ المشي' : 'امسح QR (📷) لتحديد موقعك أولاً');
     setTimeout(() => { if (tracking && devHeading == null) toast('لا تصل قراءة البوصلة — تأكد من السماح بالحركة والاتجاه للمتصفح'); }, 3000);
   }
   // المعايرة: قف وواجه اتجاه المسار الأخضر (أو أعلى الخريطة إن لم يكن هناك مسار) ثم اضغط
@@ -372,15 +372,16 @@
   function buildUI() {
     const st = document.createElement('style');
     st.textContent =
-      '.pdr-bar{position:fixed;left:12px;bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:115;display:flex;flex-direction:column;gap:8px;align-items:flex-start}' +
-      '.pdr-bar button{background:var(--panel-bg,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-main,#f1f5f9);padding:9px 12px;border-radius:10px;font-size:12px;font-weight:bold;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);font-family:inherit}' +
-      '.pdr-bar button.on{background:var(--primary-green,#10b981)}.pdr-bar span{font-size:11px;color:var(--text-sub,#94a3b8)}' +
-      '.pdr-toast{position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:400;background:var(--panel-bg,#1e293b);color:var(--text-main,#f1f5f9);border:1px solid var(--primary-green,#10b981);padding:8px 16px;border-radius:10px;font-size:12px;max-width:90vw;text-align:center}' +
-      '@media(max-width:700px){.pdr-bar{bottom:calc(90px + env(safe-area-inset-bottom,0px))}}';
+      '.pdr-bar{position:fixed;left:calc(6px + env(safe-area-inset-left,0px));top:50%;transform:translateY(-50%);z-index:115;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}' +
+      '.pdr-bar>*{pointer-events:auto}' +
+      '.pdr-bar button{width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;background:var(--panel-bg,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-main,#f1f5f9);border-radius:50%;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:.92;-webkit-tap-highlight-color:transparent}' +
+      '.pdr-bar button.on{background:var(--primary-green,#10b981);opacity:1}' +
+      '.pdr-bar span{font-size:10px;color:var(--text-sub,#94a3b8);background:var(--panel-bg,#1e293b);border-radius:8px;padding:2px 6px;opacity:.92}' +
+      '.pdr-toast{position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:400;background:var(--panel-bg,#1e293b);color:var(--text-main,#f1f5f9);border:1px solid var(--primary-green,#10b981);padding:8px 16px;border-radius:10px;font-size:12px;max-width:90vw;text-align:center}';
     document.head.appendChild(st);
     const bar = document.createElement('div');
     bar.className = 'pdr-bar';
-    bar.innerHTML = '<button id="pdrTrack">📍 تفعيل التتبع</button><button id="pdrScan">📷 مسح QR</button><button id="pdrCal">🧭 معايرة</button><span id="pdrSteps">الخطوات: 0</span>';
+    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button><span id="pdrSteps" title="عدد الخطوات">👣 0</span>';
     document.body.appendChild(bar);
     trackBtn = bar.querySelector('#pdrTrack'); stepsEl = bar.querySelector('#pdrSteps');
     trackBtn.onclick = toggleTracking;
