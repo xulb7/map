@@ -546,6 +546,8 @@ function closeQrModal() {
 
 function testQrScan(b, fl, rm) {
   closeQrModal();
+  // الباركود يحدد موقع المستخدم عند باب القاعة (إن كان pdr-nav.js محمّلاً)
+  if (window.PDR && PDR.applyParams(new URLSearchParams({ from: rm }))) return;
   selectBuilding(b);
   selectedFloor = fl;
   renderFloorsMenu();

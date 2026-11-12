@@ -78,18 +78,19 @@
     <div class="modal-content">
       <h3>شرح وتطبيق نظام الباركود (QR Code)</h3>
       <p class="modal-desc">
-        آلية العمل: يتم طباعة ملصق QR كود ولصقه عند بوابة كل مبنى أو عند السلالم. عند مسح الكود بجمال الجوال، يتم فتح الخريطة تلقائياً مع تحديد القاعة أو الدور مباشرة بدون الحاجة للبحث.
+        آلية العمل: يتم طباعة ملصق QR كود ولصقه عند بوابة كل مبنى أو عند السلالم. عند مسح الكود بكاميرا الجوال، يتم فتح الخريطة تلقائياً وتحديد موقعك الحالي على الخريطة، ثم تتبع حركتك أثناء المشي.
       </p>
 
       <div class="qr-preview-box">
         <div class="qr-card">
-          <h4>مثال: ملصق مدخل مبنى B</h4>
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://example.com/?bldg=B&floor=Ground&room=B-G-11" alt="QR Example">
-          <code>?bldg=B&floor=Ground&room=B-G-11</code>
+          <h4>مثال: ملصق عند باب القاعة B-G-11</h4>
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https%3A%2F%2Fxulb7.github.io%2Fmap%2F%3Ffrom%3DB-G-11" alt="QR Example">
+          <code>?from=B-G-11</code>
         </div>
       </div>
 
       <div class="modal-actions">
+        <button onclick="PDR.scan()" class="test-btn">📷 مسح باركود لتحديد موقعي</button>
         <button onclick="testQrScan('B', 'الدور الأرضي', 'B-G-11')" class="test-btn">تجربة مسح باركود القاعة B-G-11</button>
         <button onclick="closeQrModal()" class="close-btn">إغلاق Window</button>
       </div>
@@ -98,6 +99,5 @@
 
   <script src="script.js"></script>
   <script src="pdr-nav.js"></script>
-</body>
 </body>
 </html>
