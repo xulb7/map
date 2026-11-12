@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مولّد باركود الأماكن</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f6f2f9;color:#222}
+  .panel{max-width:760px;margin:0 auto 16px;background:#fff;padding:16px;border-radius:14px}
+  label{display:block;margin:10px 0 4px;font-weight:600}
+  input,textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid #ccc;border-radius:10px;font-size:15px;font-family:inherit}
+  textarea{height:150px;direction:ltr;text-align:left}
+  button{background:#6a1b9a;color:#fff;border:0;border-radius:10px;padding:11px 16px;font-size:15px;cursor:pointer;margin:12px 6px 0 0}
+  button.g{background:#ddd;color:#222}
+  #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;max-width:900px;margin:0 auto}
+  .card{background:#fff;border-radius:12px;padding:14px;text-align:center;break-inside:avoid;page-break-inside:avoid}
+  .card .q{display:flex;justify-content:center}
+  .card b{display:block;margin-top:8px;font-size:17px}
+  .card small{display:block;color:#666;direction:ltr;word-break:break-all;font-size:10px;margin-top:4px}
+  .card a{display:inline-block;margin-top:6px;font-size:13px;color:#6a1b9a;cursor:pointer;text-decoration:underline}
+  @media print{body{background:#fff;padding:0}.panel{display:none}#grid{grid-template-columns:repeat(3,1fr)}.card a{display:none}}
+</style>
+</head>
+<body>
+<div class="panel">
+  <h2>مولّد باركود الأماكن</h2>
+  <label>رابط الموقع</label>
+  <input id="base" value="https://xulb7.github.io/map/" dir="ltr">
+  <label>اسم الباراميتر في الرابط</label>
+  <input id="param" value="loc" dir="ltr">
+  <label>الأماكن (سطر لكل مكان — الصيغة: المعرّف | الاسم الظاهر تحت الباركود)</label>
+  <textarea id="list">A-101 | قاعة A-101
+B-101 | قاعة B-101
+Library | المكتبة
+Exit-A | مخرج الطوارئ - مبنى A</textarea>
+  <button id="gen">توليد</button>
+  <button class="g" id="dlAll">تحميل الكل PNG</button>
+  <button class="g" onclick="window.print()">طباعة</button>
+</div>
+<div id="grid"></div>
+<script>
+const cards = [];
+function build() {
+  const grid = document.getElementById('grid'); grid.innerHTML = ''; cards.length = 0;
+  const base = document.getElementById('base').value.trim();
+  const param = document.getElementById('param').value.trim() || 'loc';
+  document.getElementById('list').value.split('\n').map(s => s.trim()).filter(Boolean).forEach(line => {
+    const [id, label] = line.split('|').map(s => s.trim());
+    const url = base + (base.includes('?') ? '&' : '?') + encodeURIComponent(param) + '=' + encodeURIComponent(id);
+    const card = document.createElement('div'); card.className = 'card';
+    const q = document.createElement('div'); q.className = 'q'; card.appendChild(q);
+    new QRCode(q, { text: url, width: 512, height: 512, correctLevel: QRCode.CorrectLevel.H });
+    const q2 = q.querySelector('canvas'); 
+    setTimeout(() => { q.querySelectorAll('canvas,img').forEach(e => { e.style.width = '160px'; e.style.height = '160px'; }); }, 0);
+    card.insertAdjacentHTML('beforeend', `<b>${label || id}</b><small>${url}</small><a>تحميل PNG</a>`);
+    card.querySelector('a').onclick = () => download(q, id);
+    grid.appendChild(card); cards.push({ q, id });
+  });
+}
+function download(q, id) {
+  const c = q.querySelector('canvas'); if (!c) return;
+  const a = document.createElement('a'); a.download = `qr-${id}.png`; a.href = c.toDataURL('image/png'); a.click();
+}
+document.getElementById('gen').onclick = build;
+document.getElementById('dlAll').onclick = () => cards.forEach((c, i) => setTimeout(() => download(c.q, c.id), i * 300));
+build();
+</script>
+</body>
+</html>

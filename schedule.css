@@ -1,0 +1,17 @@
+#sch-btn{position:fixed;bottom:16px;left:16px;z-index:9999;background:#6a1b9a;color:#fff;border:0;border-radius:28px;padding:12px 18px;font:600 15px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.3);cursor:pointer}
+#sch-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:none;align-items:flex-end;justify-content:center;direction:rtl;font-family:system-ui,sans-serif}
+#sch-modal.open{display:flex}
+#sch-box{background:#fff;color:#222;width:100%;max-width:480px;max-height:90vh;overflow:auto;border-radius:18px 18px 0 0;padding:18px}
+#sch-box h3{margin:0 0 12px;font-size:18px}
+#sch-form{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#sch-form input,#sch-form select{padding:10px;border:1px solid #ccc;border-radius:10px;font-size:15px;width:100%;box-sizing:border-box}
+#sch-form .full{grid-column:1/-1}
+.sch-primary{background:#6a1b9a;color:#fff;border:0;border-radius:10px;padding:11px;font-size:15px;cursor:pointer}
+.sch-ghost{background:#eee;border:0;border-radius:10px;padding:11px;font-size:15px;cursor:pointer}
+#sch-list{margin:14px 0;padding:0;list-style:none}
+#sch-list li{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid #eee;padding:9px 0;font-size:14px}
+#sch-list small{color:#666;display:block}
+#sch-list button{background:none;border:0;color:#c62828;font-size:18px;cursor:pointer}
+#sch-status{font-size:13px;color:#555;margin:8px 0}
+#sch-actions{display:flex;gap:8px}
+#sch-actions button{flex:1}
