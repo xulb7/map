@@ -61,25 +61,3 @@
   link.href = canvas.toDataURL("image/png");
   document.head.appendChild(link);
 })();
-
-/* تعديل ألوان الـ manifest تلقائياً (للأندرويد) */
-(function () {
-  var BG_COLOR = "#0b1e3f";
-  var el = document.querySelector('link[rel="manifest"]');
-  if (!el || !window.fetch || !window.Blob || !URL.createObjectURL) return;
-  var url = el.href;
-  fetch(url)
-    .then(function (res) { return res.json(); })
-    .then(function (m) {
-      m.background_color = BG_COLOR;
-      m.theme_color = BG_COLOR;
-      // نخلي المسارات النسبية تشتغل بعد التحويل
-      var base = new URL(url, location.href);
-      m.start_url = new URL(m.start_url || ".", base).href;
-      if (m.scope) m.scope = new URL(m.scope, base).href;
-      if (m.icons) m.icons.forEach(function (i) { i.src = new URL(i.src, base).href; });
-      var blob = new Blob([JSON.stringify(m)], { type: "application/manifest+json" });
-      el.href = URL.createObjectURL(blob);
-    })
-    .catch(function () {});
-})();
