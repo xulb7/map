@@ -19,11 +19,12 @@
   /* ============================== الإعدادات ============================== */
   var CONFIG = {
     brandColor: null,        // لون الهوية؛ إذا تُرك فارغاً يلتقط اللون من متغيرات CSS في الصفحة
-    position: 'left',        // 'left' أو 'right' — موضع الزر العائم
+    position: 'right',       // 'left' أو 'right' — موضع الزر العائم (اليسار مشغول بزر الجدول)
     lang: 'ar-SA',           // لغة التعرف على الصوت
-    maxList: 25,             // أقصى عدد عناصر في القوائم
+    maxList: 60,             // أقصى عدد عناصر في القوائم
     acceptScore: 0.78,       // حد قبول المطابقة
-    suggestScore: 0.62       // حد اقتراح "تقصدين ...؟"
+    suggestScore: 0.62,      // حد اقتراح "تقصدين ...؟"
+    rooms: {}                // اختياري: أسماء/أنواع القاعات، مثال: { 'A-F-11': { name: 'معمل الحاسب', type: 'معمل' } }
   };
   if (window.MASAR_ASSISTANT_CONFIG && typeof window.MASAR_ASSISTANT_CONFIG === 'object') {
     for (var ck in window.MASAR_ASSISTANT_CONFIG) CONFIG[ck] = window.MASAR_ASSISTANT_CONFIG[ck];
@@ -177,11 +178,95 @@
 
   var indexCache = { ref: null, list: [] };
 
+  // شكل بيانات مسار: campusData[مبنى][اسم الدور] = { corridorsSvg, rooms: [ { id, label, ... } ] }
+  function isCampusShape(data) {
+    var keys = Object.keys(data);
+    if (!keys.length) return false;
+    return keys.every(function (b) {
+      var fl = data[b];
+      if (!fl || typeof fl !== 'object' || Array.isArray(fl)) return false;
+      var fk = Object.keys(fl);
+      return fk.length > 0 && fk.every(function (f) { return fl[f] && Array.isArray(fl[f].rooms); });
+    });
+  }
+
+  function floorFromName(name) {
+    var n = norm(name);
+    if (/ارضي/.test(n)) return 'g';
+    if (/اول/.test(n)) return 'f';
+    if (/ثاني/.test(n)) return 's';
+    if (/ثالث/.test(n)) return 't';
+    return null;
+  }
+
+  function roomInfo(id) {
+    var rooms = CONFIG.rooms || {}, k;
+    for (k in rooms) { if (norm(k) === norm(id)) return rooms[k]; }
+    return null;
+  }
+
+  function buildCampusIndex(data) {
+    var list = [];
+    Object.keys(data).forEach(function (bk) {
+      var b = makeEntity({ id: bk, name: 'مبنى ' + bk }, 'building', bk, null);
+      pushName(b.names, 'building ' + bk);
+      pushName(b.names, 'بلوك ' + bk);
+      b.names = b.names.filter(function (n) { return n !== norm(bk); });
+      list.push(b);
+      Object.keys(data[bk]).forEach(function (fk, fi) {
+        var code = floorFromName(fk) || String(fi);
+        var f = makeEntity({ name: fk, floor: code }, 'floor', fk, b);
+        f.names = [norm('الدور ' + String(fk).replace(/^الدور\s*/, ''))];
+        list.push(f);
+        data[bk][fk].rooms.forEach(function (r) {
+          var id = String(r.id != null ? r.id : r.label || '');
+          if (!id) return;
+          var label = String(r.label != null ? r.label : id);
+          // أحياناً يكون الـ label فيه اسم إضافي بين قوسين، مثل: A-F-13 (العميدة)
+          var extra = '';
+          var lm = label.match(/^\s*([^\n(]+?)\s*[\n(]+\s*\(?([^)]+?)\)?\s*$/);
+          if (lm && lm[2] && lm[1].replace(/\s+/g, '') === id.replace(/\s+/g, '')) { extra = lm[2].trim(); label = lm[1].trim(); }
+          label = label.replace(/\s+/g, ' ').trim();
+          var info = roomInfo(id), raw = { id: id, label: label, floor: code };
+          if (info) {
+            if (typeof info === 'string') info = { name: info };
+            if (info.type) raw.type = info.type;
+            if (info.note) raw.note = info.note;
+            if (info.description) raw.description = info.description;
+          }
+          var e = makeEntity(raw, 'room', id, f);
+          e.names = [];
+          pushName(e.names, id);
+          pushName(e.names, label);
+          pushName(e.names, norm(id).replace(/-0+(\d)/g, '-$1'));  // B-F-07 = B-F-7
+          if (extra && !(info && info.name)) {
+            pushName(e.names, extra);
+            e.display = extra + ' (' + label + ')';
+          } else if (info && info.name) {
+            pushName(e.names, info.name);
+            (info.aliases || []).forEach(function (a) { pushName(e.names, a); });
+            e.display = info.name + ' (' + label + ')';
+          } else {
+            e.display = label;
+          }
+          list.push(e);
+        });
+      });
+    });
+    return list;
+  }
+
   function getIndex() {
     var data = getData();
     if (!data || typeof data !== 'object') return null;
     if (indexCache.ref === data) return indexCache.list;
     var list = [];
+
+    if (isCampusShape(data)) {
+      try { list = buildCampusIndex(data); } catch (e) { list = []; }
+      indexCache = { ref: data, list: list };
+      return list;
+    }
 
     function walk(node, kindKey, parent, idKey, depth) {
       if (depth > 12 || node == null) return;
@@ -358,7 +443,7 @@
     // أفضلية الأماكن داخل المبنى/الدور المذكور في السؤال
     var accSet = accepted.map(function (x) { return x.e; });
     accepted.forEach(function (x) {
-      if (!x.e.children.length && ancestors(x.e).some(function (a) { return accSet.indexOf(a) >= 0; })) x.score += 0.06;
+      if (ancestors(x.e).some(function (a) { return accSet.indexOf(a) >= 0; })) x.score += 0.06;
     });
     // إذا ذُكر مكان وداخله مكان آخر (مبنى + دور/قاعة) نأخذ الأعمق ونعتبر الأب سياقاً
     var dropSet = [];
@@ -531,8 +616,13 @@
       var floor = parseFloorFilter(qn);
       var first = m.accepted[0];
 
-      if (m.accepted.length === 1 && first.children.length && (RE.listWords.test(qn) || floor)) {
-        res.lines = listContents(first, floor);
+      if (m.accepted.every(function (x) { return x.children.length; })) {
+        var outL = [];
+        m.accepted.forEach(function (x, i) {
+          if (i > 0) outL.push('');
+          outL = outL.concat(listContents(x, floor));
+        });
+        res.lines = outL;
         res.entity = first;
         lastEntity = first;
         return res;
