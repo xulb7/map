@@ -862,7 +862,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: text, history: aiHistory.slice(-6) })
       }).then(function (r) {
-        if (!r.ok) throw new Error('http ' + r.status);
+        if (!r.ok) return r.text().then(function (t) { throw new Error('http ' + r.status + ' ' + t); });
         return r.json();
       }).then(function (d) {
         clearTimeout(timer);
@@ -910,7 +910,8 @@
     askAI(text).then(function (a) {
       aiHistory.push({ role: 'user', text: text }, { role: 'model', text: a });
       finish(typing, { lines: [a], chips: [], entity: null });
-    }).catch(function () {
+    }).catch(function (err) {
+      try { console.warn('Masar AI error:', err && err.message ? err.message : err); } catch (e) {}
       finish(typing, res);
     });
   }
