@@ -852,7 +852,50 @@
   // هل يكفي الرد المحلي؟ (مكان محدد في الخريطة، أو تحية/شكر/قائمة مباني)
   function localIsEnough(res) { return !!(res.entity || res.final); }
 
+  var AI_SYSTEM = [
+    'أنتِ "مسار"، مساعدة الكلية التقنية للبنات بالزلفي.',
+    'تجاوبين بلهجة سعودية مبسطة ومختصرة.',
+    'إذا كان السؤال خارج الكلية اعتذري بلطف وقولي إنك تجاوبين عن الكلية والتنقل فيها فقط.',
+    'إذا ما عرفتِ المعلومة قولي "ما عندي هالمعلومة" ووجهيها لشؤون الطالبات، ولا تخترعين أسماء أو إيميلات أو أرقام قاعات.',
+    'معلومات الكلية: الكلية فيها مبنيين A و B، وكل مبنى فيه دور أرضي وأدوار علوية. الخريطة تعرض القاعات بأرقامها مثل A-G-1.'
+  ].join('\n');
+
+  // اتصال مباشر بجيميناي (المفتاح في ai-key.js)
+  function askGeminiDirect(text, key) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+      var timer = setTimeout(function () {
+        if (!done) { done = true; if (ctrl) ctrl.abort(); reject(new Error('timeout')); }
+      }, CONFIG.aiTimeout);
+      var contents = aiHistory.slice(-6).concat([{ role: 'user', text: text }]).map(function (m) {
+        return { role: m.role === 'user' ? 'user' : 'model', parts: [{ text: String(m.text).slice(0, 500) }] };
+      });
+      fetch('https://generativelanguage.googleapis.com/v1beta/models/' + (window.MASAR_GEMINI_MODEL || 'gemini-2.5-flash') + ':generateContent', {
+        method: 'POST',
+        signal: ctrl ? ctrl.signal : undefined,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: AI_SYSTEM }] }, contents: contents })
+      }).then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error('http ' + r.status + ' ' + t.slice(0, 300)); });
+        return r.json();
+      }).then(function (d) {
+        clearTimeout(timer);
+        if (done) return;
+        done = true;
+        var a = d && d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts && d.candidates[0].content.parts[0] && d.candidates[0].content.parts[0].text;
+        a = a ? String(a).trim() : '';
+        if (!a) reject(new Error('empty')); else resolve(a);
+      }).catch(function (e) {
+        clearTimeout(timer);
+        if (!done) { done = true; reject(e); }
+      });
+    });
+  }
+
   function askAI(text) {
+    var key = window.MASAR_GEMINI_KEY;
+    if (key && key.indexOf('ضعي') !== 0) return askGeminiDirect(text, key);
     return new Promise(function (resolve, reject) {
       if (!CONFIG.aiEndpoint || typeof fetch !== 'function') { reject(new Error('off')); return; }
       var done = false;
