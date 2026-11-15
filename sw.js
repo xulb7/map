@@ -1,4 +1,4 @@
-const CACHE = 'campus-map-v5';
+const CACHE = 'campus-map-v1';
 const FILES = ['./', './index.html', './script.js', './style.css', './schedule.js', './schedule.css', './manifest.json'];
 
 self.addEventListener('install', e => {

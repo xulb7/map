@@ -24,8 +24,6 @@
     maxList: 60,             // أقصى عدد عناصر في القوائم
     acceptScore: 0.78,       // حد قبول المطابقة
     suggestScore: 0.62,      // حد اقتراح "تقصدين ...؟"
-    aiEndpoint: 'https://cool-night-3daa.taef1317.workers.dev/', // رابط الوسيط (Cloudflare Worker) المرتبط بجيميناي؛ اتركيه فارغاً لإيقاف الذكاء
-    aiTimeout: 15000,        // مهلة انتظار رد الذكاء بالملي ثانية
     rooms: {}                // اختياري: أسماء/أنواع القاعات، مثال: { 'A-F-11': { name: 'معمل الحاسب', type: 'معمل' } }
   };
   if (window.MASAR_ASSISTANT_CONFIG && typeof window.MASAR_ASSISTANT_CONFIG === 'object') {
@@ -598,19 +596,17 @@
 
     // 1) تحية/شكر/وداع/تعريف — فقط إذا ما فيه مكان مذكور
     if (!m.accepted.length) {
-      if (RE.thanks.test(qn)) { res.lines = [pick(['العفو، أي وقت! 🌷', 'حياك الله، أبشري بأي شي ثاني 🌸'])]; res.final = true; return res; }
-      if (RE.bye.test(qn)) { res.lines = ['الله يحفظك، بالتوفيق! 🌟']; res.final = true; return res; }
+      if (RE.thanks.test(qn)) { res.lines = [pick(['العفو، أي وقت! 🌷', 'حياك الله، أبشري بأي شي ثاني 🌸'])]; return res; }
+      if (RE.bye.test(qn)) { res.lines = ['الله يحفظك، بالتوفيق! 🌟']; return res; }
       if (RE.help.test(qn)) {
         res.lines = ['أنا مساعد مسار 🧭 أساعدك تعرفين وين المباني والقاعات في الكلية وش فيها، وأجاوب من بيانات الكلية بس.',
                      'جربي تسألين عن قاعة أو مبنى، أو اطلبي قائمة المباني.'];
         res.chips = sampleChips();
-        res.final = true;
         return res;
       }
       if (qtok.length <= 4 && RE.greet.test(qn)) {
         res.lines = [pick(['هلا والله! 👋', 'يا هلا فيك! 🌷', 'أهلين! 👋']) + ' كيف أقدر أساعدك؟ اسأليني عن أي قاعة أو مبنى.'];
         res.chips = sampleChips();
-        res.final = true;
         return res;
       }
     }
@@ -657,7 +653,6 @@
     if (RE.buildingsWord.test(qn) && (RE.buildingsQ.test(qn) || qtok.length <= 3)) {
       var lb = listBuildings(RE.count.test(qn));
       res.lines = lb || ['ما لقيت قائمة مباني في بيانات الكلية 🤔'];
-      res.final = !!lb;
       return res;
     }
 
@@ -840,99 +835,6 @@
 
   var busy = false;
 
-  var aiHistory = [];
-
-  function localReply(text) {
-    var res;
-    try { res = answer(text); }
-    catch (e) { res = { lines: ['صار عندي خلل بسيط 😅 جربي تعيدين السؤال.'], chips: [], entity: null }; }
-    return res;
-  }
-
-  // هل يكفي الرد المحلي؟ (مكان محدد في الخريطة، أو تحية/شكر/قائمة مباني)
-  function localIsEnough(res) { return !!(res.entity || res.final); }
-
-  var AI_SYSTEM = [
-    'أنتِ "مسار"، مساعدة ذكية ودودة للكلية التقنية للبنات بالزلفي.',
-    'تجاوبين على أي سؤال يُسأل بلهجة سعودية مبسطة وواضحة ومختصرة، سواء كان عن الكلية أو عن أي موضوع ثاني.',
-    'إذا كان السؤال عن الكلية (مبنى A أو B، القاعات مثل A-G-1، المدربات، الجداول، الخدمات) وما تعرفين الجواب بالتأكيد، قولي "ما عندي هالمعلومة" ووجهيها لشؤون الطالبات، ولا تخترعين أسماء أو إيميلات أو أرقام قاعات.',
-    'الخريطة فيها مبنيين A و B وكل مبنى فيه دور أرضي وأدوار علوية.'
-  ].join('\n');
-
-  // اتصال مباشر بجيميناي (المفتاح في ai-key.js)
-  function askGeminiDirect(text, key) {
-    return new Promise(function (resolve, reject) {
-      var done = false;
-      var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
-      var timer = setTimeout(function () {
-        if (!done) { done = true; if (ctrl) ctrl.abort(); reject(new Error('timeout')); }
-      }, CONFIG.aiTimeout);
-      var contents = aiHistory.slice(-6).concat([{ role: 'user', text: text }]).map(function (m) {
-        return { role: m.role === 'user' ? 'user' : 'model', parts: [{ text: String(m.text).slice(0, 500) }] };
-      });
-      fetch('https://generativelanguage.googleapis.com/v1beta/models/' + (window.MASAR_GEMINI_MODEL || 'gemini-2.5-flash') + ':generateContent', {
-        method: 'POST',
-        signal: ctrl ? ctrl.signal : undefined,
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: AI_SYSTEM }] }, contents: contents })
-      }).then(function (r) {
-        if (!r.ok) return r.text().then(function (t) { throw new Error('http ' + r.status + ' ' + t.slice(0, 300)); });
-        return r.json();
-      }).then(function (d) {
-        clearTimeout(timer);
-        if (done) return;
-        done = true;
-        var a = d && d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts && d.candidates[0].content.parts[0] && d.candidates[0].content.parts[0].text;
-        a = a ? String(a).trim() : '';
-        if (!a) reject(new Error('empty')); else resolve(a);
-      }).catch(function (e) {
-        clearTimeout(timer);
-        if (!done) { done = true; reject(e); }
-      });
-    });
-  }
-
-  function askAI(text) {
-    var key = window.MASAR_GEMINI_KEY;
-    if (key && key.indexOf('ضعي') !== 0) return askGeminiDirect(text, key);
-    return new Promise(function (resolve, reject) {
-      if (!CONFIG.aiEndpoint || typeof fetch !== 'function') { reject(new Error('off')); return; }
-      var done = false;
-      var timer = setTimeout(function () { if (!done) { done = true; reject(new Error('timeout')); } }, CONFIG.aiTimeout);
-      fetch(CONFIG.aiEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: text, history: aiHistory.slice(-6) })
-      }).then(function (r) {
-        if (!r.ok) return r.text().then(function (t) { throw new Error('http ' + r.status + ' ' + t); });
-        return r.json();
-      }).then(function (d) {
-        clearTimeout(timer);
-        if (done) return;
-        done = true;
-        var a = d && typeof d.answer === 'string' ? d.answer.trim() : '';
-        if (!a) reject(new Error('empty')); else resolve(a);
-      }).catch(function (e) {
-        clearTimeout(timer);
-        if (!done) { done = true; reject(e); }
-      });
-    });
-  }
-
-  function finish(typing, res) {
-    if (typing.parentNode) typing.parentNode.removeChild(typing);
-    addBubble(res.lines.join('\n'), 'bot');
-    addChips(res.chips || []);
-    if (res.entity) {
-      try {
-        window.dispatchEvent(new CustomEvent('masar:assistant-place', {
-          detail: { id: res.entity.idKey, name: res.entity.display, data: res.entity.raw }
-        }));
-      } catch (e) {}
-    }
-    busy = false;
-  }
-
   function send(text) {
     text = String(text || '').trim();
     if (!text || busy) return;
@@ -941,23 +843,22 @@
     addBubble(text, 'user');
     ui.input.value = '';
     var typing = showTyping();
-    var res = localReply(text);
-
-    if (localIsEnough(res)) {
-      setTimeout(function () { finish(typing, res); }, 280 + Math.random() * 220);
-      return;
-    }
-
-    // غير موجود محلياً: نسأل الذكاء، وإن تعذّر نرجع للرد المحلي
-    askAI(text).then(function (a) {
-      aiHistory.push({ role: 'user', text: text }, { role: 'model', text: a });
-      finish(typing, { lines: [a], chips: [], entity: null });
-    }).catch(function (err) {
-      var msg = (err && err.message) ? String(err.message) : String(err);
-      try { console.warn('Masar AI error:', msg); } catch (e) {}
-      var lines = (res.lines || []).concat(['', '⚠️ الذكاء الاصطناعي ما اشتغل: ' + msg.slice(0, 220)]);
-      finish(typing, { lines: lines, chips: res.chips || [], entity: res.entity || null });
-    });
+    setTimeout(function () {
+      var res;
+      try { res = answer(text); }
+      catch (e) { res = { lines: ['صار عندي خلل بسيط 😅 جربي تعيدين السؤال.'], chips: [], entity: null }; }
+      if (typing.parentNode) typing.parentNode.removeChild(typing);
+      addBubble(res.lines.join('\n'), 'bot');
+      addChips(res.chips);
+      if (res.entity) {
+        try {
+          window.dispatchEvent(new CustomEvent('masar:assistant-place', {
+            detail: { id: res.entity.idKey, name: res.entity.display, data: res.entity.raw }
+          }));
+        } catch (e) {}
+      }
+      busy = false;
+    }, 280 + Math.random() * 220);
   }
 
   /* ----------------------------- المايك ----------------------------- */
