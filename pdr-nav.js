@@ -17,7 +17,9 @@
     headingDead: 3,       // تجاهل تغيّر الاتجاه الأقل من هذي الدرجات (يمنع ارتجاف السهم)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
-    followZoom: 1.6,      // مستوى التقريب عند تحديد موقعك (الحد الأقصى 3)
+    followZoom: 1.1,      // مستوى التقريب عند تحديد موقعك (الحد الأقصى 3)
+    camPosTau: 0.15,      // نعومة حركة الكاميرا بالثواني (أقل = أسرع وأحدّ، أكثر = أنعم وأبطأ)
+    camRotTau: 0.2,       // نعومة دوران الخريطة بالثواني
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -28,6 +30,8 @@
   let lastPeakT = 0, streak = 0;
   let markerEl, arrowEl, stepsEl, trackBtn;
   let following = false, focusT = null; // وضع تتبع الكاميرا لموقعك (مثل قوقل ماب)
+  let dpos = null, drot = 0, camRaf = 0, camT = 0; // موقع واتجاه الكاميرا المعروضين (ناعمين)
+  let rotateMode = (function () { try { return localStorage.getItem('pdr_rot') !== '0'; } catch (e) { return true; } })(); // الخريطة تدور معك
 
   /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */
   const store = {
@@ -164,7 +168,7 @@
     if (matchesFloor()) {
       if (moved) updateRoute();
       render();
-      if (moved && following) focusOnUser();
+      if (moved && following) camKick();
     } else {
       hint('موقعك مسجّل في مبنى ' + posCtx.b + ' — ' + posCtx.f + '. إذا انتقلت لدور أو مبنى آخر امسح QR هناك لتحديث موقعك');
     }
@@ -205,24 +209,72 @@
   function render() {
     if (!markerEl) return;
     if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }
+    const q = (following && dpos) ? dpos : pos;
     markerEl.setAttribute('display', 'block');
-    markerEl.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
+    markerEl.setAttribute('transform', 'translate(' + q.x + ',' + q.y + ')');
     arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
   }
 
-  /* ---------- كاميرا التتبع: تقريب وتوسيط الخريطة على موقعك ---------- */
-  function focusOnUser(zoom) {
+  /* ---------- كاميرا التتبع (مثل قوقل ماب): توسيط + تقريب + دوران ناعم ---------- */
+  const anchorFor = v => ({ x: v.w / 2, y: v.topPad + (v.h - v.topPad) * (rotateMode ? 0.62 : 0.5) });
+
+  function applyCam() {
+    const v = viewMetrics(), a = anchorFor(v);
+    if (rotateMode) {
+      // نقطتك تثبت على نقطة الارتكاز، والخريطة تدور بحيث اتجاه مشيك يكون لفوق
+      board.style.transform = 'translate(' + a.x + 'px,' + a.y + 'px) rotate(' + (-drot) + 'deg) scale(' + scale + ') translate(' + (-dpos.x) + 'px,' + (-dpos.y) + 'px)';
+      // نحفظ قيم السحب بحيث لو خرجتِ من التتبع تبقى الخريطة مركّزة عليك
+      pointX = v.w / 2 - dpos.x * scale;
+      pointY = v.topPad + (v.h - v.topPad) / 2 - dpos.y * scale;
+    } else {
+      pointX = a.x - dpos.x * scale;
+      pointY = a.y - dpos.y * scale;
+      _ut();
+    }
+  }
+
+  function camTick(ts) {
+    camRaf = 0;
+    if (!following || !pos || !matchesFloor() || !dpos) return;
+    const dt = camT ? Math.min(0.1, (ts - camT) / 1000) : 0.016;
+    camT = ts;
+    const kp = 1 - Math.exp(-dt / CFG.camPosTau), kr = 1 - Math.exp(-dt / CFG.camRotTau);
+    dpos.x += (pos.x - dpos.x) * kp;
+    dpos.y += (pos.y - dpos.y) * kp;
+    const target = mapHeading();
+    drot = (drot + angDiff(target, drot) * kr + 360) % 360;
+    render();
+    applyCam();
+    if (dist(dpos, pos) > 0.2 || Math.abs(angDiff(target, drot)) > 0.5) camRaf = requestAnimationFrame(camTick);
+    else camT = 0;
+  }
+
+  function camKick() { if (following && !camRaf) camRaf = requestAnimationFrame(camTick); }
+
+  function startFollow(zoom) {
     if (!matchesFloor()) return;
-    const v = viewMetrics();
+    following = true;
+    dpos = { x: pos.x, y: pos.y };
+    drot = mapHeading();
     if (zoom != null) scale = Math.min(Math.max(0.25, zoom), 3);
-    pointX = v.w / 2 - pos.x * scale;
-    pointY = v.topPad + (v.h - v.topPad) / 2 - pos.y * scale;
     clearTimeout(focusT);
-    if (zoom != null) { // تقريب ناعم عند تحديد الموقع فقط؛ أثناء المشي تتحرك الخريطة مع النقطة مباشرة
-      board.style.transition = 'transform .35s ease';
-      focusT = setTimeout(() => { board.style.transition = 'none'; }, 400);
-    } else board.style.transition = 'none';
-    updateTransform();
+    board.style.transition = 'transform .6s ease'; // دخول ناعم عند تحديد الموقع
+    focusT = setTimeout(() => { board.style.transition = 'none'; }, 650);
+    render();
+    applyCam();
+    camT = 0;
+    camKick();
+  }
+
+  function stopFollow() {
+    if (!following) return;
+    following = false;
+    cancelAnimationFrame(camRaf); camRaf = 0; camT = 0;
+    clearTimeout(focusT);
+    board.style.transition = 'transform .3s ease';
+    focusT = setTimeout(() => { board.style.transition = 'none'; }, 350);
+    window.updateTransform(); // يرجع للعرض العادي (الشمال فوق) وهو مركّز عليك
+    render();
   }
 
   function setPos(x, y, b, f) {
@@ -266,7 +318,7 @@
       highlightAndRoute();
     }
     render(); updateRoute();
-    if (hasStart) { following = true; focusOnUser(CFG.followZoom); }
+    if (hasStart) startFollow(CFG.followZoom);
     return true;
   }
   function handleQrText(text) {
@@ -373,6 +425,7 @@
     }
     gotHeading(h);
     render();
+    camKick();
   }
   async function toggleTracking() {
     if (tracking) {
@@ -429,7 +482,7 @@
     document.head.appendChild(st);
     const bar = document.createElement('div');
     bar.className = 'pdr-bar';
-    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button><button id="pdrFocus" title="العودة لموقعي" aria-label="العودة لموقعي">🎯</button>';
+    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button><button id="pdrFocus" title="العودة لموقعي" aria-label="العودة لموقعي">🎯</button><button id="pdrRot" title="تدوير الخريطة معي" aria-label="تدوير الخريطة معي">🔄</button>';
     document.body.appendChild(bar);
     trackBtn = bar.querySelector('#pdrTrack'); stepsEl = bar.querySelector('#pdrSteps');
     trackBtn.onclick = toggleTracking;
@@ -438,7 +491,21 @@
     bar.querySelector('#pdrFocus').onclick = () => {
       if (!pos) { toast('امسح QR (📷) لتحديد موقعك أولاً'); return; }
       if (!matchesFloor()) { toast('موقعك في مبنى ' + posCtx.b + ' — ' + posCtx.f); return; }
-      following = true; focusOnUser(CFG.followZoom);
+      startFollow(CFG.followZoom);
+    };
+    const rotBtn = bar.querySelector('#pdrRot');
+    rotBtn.classList.toggle('on', rotateMode);
+    rotBtn.onclick = () => {
+      rotateMode = !rotateMode;
+      try { localStorage.setItem('pdr_rot', rotateMode ? '1' : '0'); } catch (e) { /* سفاري الخاص */ }
+      rotBtn.classList.toggle('on', rotateMode);
+      toast(rotateMode ? 'الخريطة تدور معك' : 'الخريطة ثابتة والشمال فوق');
+      if (following && matchesFloor()) {
+        clearTimeout(focusT);
+        board.style.transition = 'transform .4s ease';
+        focusT = setTimeout(() => { board.style.transition = 'none'; }, 450);
+        applyCam(); camKick();
+      }
     };
 
     markerEl = document.createElementNS(NS, 'g');
@@ -450,10 +517,22 @@
 
   /* ---------- ربط بدون تعديل الكود الأصلي ---------- */
   const _render = window.renderBlueprint;
-  window.renderBlueprint = function () { _render.apply(this, arguments); render(); if (following && matchesFloor()) focusOnUser(CFG.followZoom); };
+  window.renderBlueprint = function () { _render.apply(this, arguments); render(); if (following && matchesFloor()) startFollow(CFG.followZoom); };
 
   const _reset = window.resetZoom;
-  window.resetZoom = function () { following = false; _reset.apply(this, arguments); };
+  window.resetZoom = function () { stopFollow(); _reset.apply(this, arguments); };
+
+  // أثناء التتبع: التكبير والتصغير وتدوير الشاشة يمرّون على الكاميرا بدل ما يكسرون الدوران
+  const _ut = window.updateTransform;
+  window.updateTransform = function () {
+    if (following && pos && matchesFloor() && dpos) { applyCam(); return; }
+    _ut.apply(this, arguments);
+  };
+  const _fit = window.fitToScreen;
+  window.fitToScreen = function () {
+    _fit.apply(this, arguments);
+    if (following && matchesFloor() && dpos) { scale = Math.min(Math.max(0.25, CFG.followZoom), 3); applyCam(); camKick(); }
+  };
 
   const _clear = window.clearNavigation;
   window.clearNavigation = function () { dest = null; _clear.apply(this, arguments); };
@@ -469,15 +548,21 @@
 
   buildUI();
 
-  // إذا سحبتِ الخريطة بإصبعك يتوقف التتبع التلقائي (ويرجع بزر 🎯 أو بمسح QR جديد)
+  // إذا سحبتِ الخريطة بإصبع واحد يتوقف التتبع التلقائي (ويرجع بزر 🎯 أو بمسح QR جديد)
   (function () {
     const w = document.getElementById('mapWrapper');
-    let sx = 0, sy = 0;
-    w.addEventListener('pointerdown', e => { sx = e.clientX; sy = e.clientY; });
+    const ptrs = new Map();
+    w.addEventListener('pointerdown', e => { ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
     w.addEventListener('pointermove', e => {
-      if (e.buttons && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) { following = false; board.style.transition = 'none'; }
+      const p = ptrs.get(e.pointerId);
+      if (!p || ptrs.size !== 1) return; // القرص بإصبعين = تكبير فقط، لا يوقف التتبع
+      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 6) stopFollow();
     });
-    w.addEventListener('wheel', () => { following = false; }, { passive: true });
+    const up = e => ptrs.delete(e.pointerId);
+    w.addEventListener('pointerup', up);
+    w.addEventListener('pointercancel', up);
+    w.addEventListener('lostpointercapture', up);
+    w.addEventListener('wheel', e => { if (!e.ctrlKey) stopFollow(); }, { passive: true });
   })();
 
   // محاكاة بالكيبورد للتجربة على الكمبيوتر: ↑ خطوة، ←/→ تدوير 15°
@@ -486,7 +571,7 @@
     if (devHeading == null) gotHeading(offsetFor(posCtx.b));
     if (e.key === 'ArrowUp') { onStep(); e.preventDefault(); }
     else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      devHeading = (devHeading + (e.key === 'ArrowLeft' ? -15 : 15) + 360) % 360; render(); e.preventDefault();
+      devHeading = (devHeading + (e.key === 'ArrowLeft' ? -15 : 15) + 360) % 360; render(); camKick(); e.preventDefault();
     }
   });
 
