@@ -13,9 +13,6 @@
     stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
-    turnEase: 0.08,       // نعومة دوران الخريطة (أقل = أهدى)
-    turnDead: 3,          // أي تغير في الاتجاه أقل من هذي الدرجات يتجاهله (يمنع الرجفة)
-    turnMaxStep: 3,       // أقصى دوران بالدرجات في كل إطار (يمنع الدوخة)
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -42,13 +39,15 @@
 
   /* ---------- وضع "الخريطة تدور معك" (Heading-up) مثل قوقل ماب ---------- */
   let followMode = true, wasFollowing = false, followBtn = null, zoomedForFollow = false;
-  const followActive = () => followMode && devHeading != null && matchesFloor();
+  let viewH = null, rafId = 0, turning = false;
+  const followActive = () => followMode && devHeading != null && !pendingH && matchesFloor();
 
   function applyFollow() {
     if (!followActive()) return false;
     const v = viewMetrics();
     const ax = v.w / 2, ay = v.topPad + (v.h - v.topPad) * 0.68; // موقعك في الثلث السفلي والمسافة قدامك
-    const h = mapHeading();
+    if (viewH == null) viewH = mapHeading();
+    const h = viewH;
     if (!zoomedForFollow) { zoomedForFollow = true; if (scale < 1) scale = 1; }
     const a = -h * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
     const px = pos.x * scale, py = pos.y * scale;
@@ -64,10 +63,23 @@
     if (followActive()) { scale = Math.min(Math.max(0.25, scale * f), 3); updateTransform(); return; }
     _zoomAt.apply(this, arguments);
   };
+  // دوران هادئ: منطقة ميتة + تدرّج + حد أقصى للسرعة، فما تتأثر الخريطة برجفة البوصلة
+  function tickView() {
+    rafId = 0;
+    if (!followActive()) { viewH = null; turning = false; return; }
+    const d = angDiff(mapHeading(), viewH == null ? (viewH = mapHeading()) : viewH);
+    if (!turning && Math.abs(d) > 6) turning = true;
+    if (turning) {
+      if (Math.abs(d) < 1.5) turning = false;
+      else { viewH = (viewH + Math.max(-1.8, Math.min(1.8, d * 0.08)) + 360) % 360; updateTransform(); }
+    }
+    rafId = requestAnimationFrame(tickView);
+  }
   function syncFollow() {
     const now = followActive();
+    if (now && !rafId) rafId = requestAnimationFrame(tickView);
     if (now) updateTransform();
-    else if (wasFollowing) { zoomedForFollow = false; fitToScreen(); }
+    else if (wasFollowing) { zoomedForFollow = false; viewH = null; fitToScreen(); }
     wasFollowing = now;
     if (followBtn) followBtn.classList.toggle('on', followMode);
   }
@@ -234,7 +246,7 @@
     if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }
     markerEl.setAttribute('display', 'block');
     markerEl.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
-    arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
+    arrowEl.setAttribute('transform', 'rotate(' + (followActive() ? angDiff(mapHeading(), viewH == null ? mapHeading() : viewH) : mapHeading()) + ')');
     syncFollow();
   }
 
@@ -271,8 +283,8 @@
     if (hasStart) {
       setPos(x, y, b, f);
       const h = parseFloat(p.get('h'));
-      if (!isNaN(h)) { if (devHeading != null) setOffset(b, devHeading - h); else pendingH = { b, h }; }
-      toast('تم تحديد موقعك');
+      if (!isNaN(h)) pendingH = { b, h, s: [], t0: Date.now() };
+      toast(pendingH ? 'تم تحديد موقعك… ثبّتي الجوال لحظة وواجهي الجدار' : 'تم تحديد موقعك');
     }
     if (rr && rr.b === selectedBldg && rr.f === selectedFloor) {
       document.getElementById('roomDropdown').value = rr.room.id;
@@ -341,9 +353,27 @@
   }
 
   /* ---------- المستشعرات ---------- */
-  function gotHeading(h) {
-    devHeading = h;
-    if (pendingH != null) { setOffset(pendingH.b, h - pendingH.h); pendingH = null; }
+  function gotHeading(h) { devHeading = h; }
+  const circMean = a => { let x = 0, y = 0; a.forEach(v => { x += Math.cos(v * Math.PI / 180); y += Math.sin(v * Math.PI / 180); }); return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360; };
+  function settleCalib(raw) {
+    const c = pendingH, t = Date.now();
+    c.s.push(raw); if (c.s.length > 40) c.s.shift();
+    if (t - c.t0 < 1200 || c.s.length < 8) return;
+    const last = c.s.slice(-8), m = circMean(last);
+    const spread = Math.max.apply(null, last.map(v => Math.abs(angDiff(v, m))));
+    if (spread > 12 && t - c.t0 < 4000) return; // لسا البوصلة تتحرك — ننتظر تستقر
+    setOffset(c.b, m - c.h);
+    pendingH = null; viewH = null; turning = false;
+    render(); updateRoute();
+  }
+  // اتجاه الجوال مع تعويض الميلان (أندرويد): يستخدم أعلى الجوال إذا كان مسطحاً، وظهره إذا كان واقفاً
+  function tiltHeading(alpha, beta, gamma) {
+    const r = Math.PI / 180, a = alpha * r, b = (beta || 0) * r, g = (gamma || 0) * r;
+    const sa = Math.sin(a), ca = Math.cos(a), sb = Math.sin(b), cb = Math.cos(b), sg = Math.sin(g), cg = Math.cos(g);
+    const upright = Math.abs(beta || 0) > 50;
+    const E = upright ? (-ca * sg - sa * sb * cg) : (-sa * cb);
+    const N = upright ? (-sa * sg + ca * sb * cg) : (ca * cb);
+    return (Math.atan2(E, N) / r + 360) % 360;
   }
   function onMotion(e) {
     const a = e.accelerationIncludingGravity;
@@ -354,43 +384,14 @@
     if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { lastStepT = t; onStep(); }
     d2 = d1; d1 = d;
   }
-  /* اتجاه الجوال: يشتغل سواء كان الجوال مسطح أو واقف (يمنع القفزات العشوائية في أندرويد) */
-  function compassHeading(e) {
-    if (typeof e.webkitCompassHeading === 'number') return e.webkitCompassHeading;
-    if (!e.absolute || e.alpha == null) return null;
-    if (e.beta == null || e.gamma == null) return (360 - e.alpha) % 360;
-    const R = Math.PI / 180, z = e.alpha * R, x = e.beta * R, y = e.gamma * R;
-    const cZ = Math.cos(z), sZ = Math.sin(z), cX = Math.cos(x), sX = Math.sin(x), cY = Math.cos(y), sY = Math.sin(y);
-    let ex = -sZ * cX, ny = cZ * cX;                       // حافة الجوال العلوية (تثبت والجوال مسطح)
-    const w = Math.max(0, Math.min(1, (e.beta - 30) / 30)); // ظهر الجوال (يثبت والجوال واقف)
-    if (w > 0) { ex += w * (-cZ * sY - sZ * sX * cY); ny += w * (-sZ * sY + cZ * sX * cY); }
-    if (Math.hypot(ex, ny) < 0.05) return null;
-    return (Math.atan2(ex, ny) / R + 360) % 360;
-  }
-
-  let rawH = null, fx = 0, fy = 0, oriN = 0, turnRaf = 0, turning = false;
-  function turnTick() {
-    turnRaf = 0;
-    if (rawH == null || devHeading == null) return;
-    if (pendingH != null && oriN >= 8) { devHeading = rawH; setOffset(pendingH.b, devHeading - pendingH.h); pendingH = null; render(); }
-    const diff = angDiff(rawH, devHeading), ad = Math.abs(diff);
-    if (ad < (turning ? 0.6 : CFG.turnDead)) { turning = false; return; } // ثابت: لا نحرّك الخريطة
-    turning = true;
-    const step = Math.max(-CFG.turnMaxStep, Math.min(CFG.turnMaxStep, diff * CFG.turnEase));
-    devHeading = (devHeading + step + 360) % 360;
-    render();
-    turnRaf = requestAnimationFrame(turnTick);
-  }
   function onOri(e) {
-    const h = compassHeading(e);
+    let h = null;
+    if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
+    else if (e.absolute && e.alpha != null) h = tiltHeading(e.alpha, e.beta, e.gamma);
     if (h == null) return;
-    const R = Math.PI / 180;
-    if (oriN === 0) { fx = Math.sin(h * R); fy = Math.cos(h * R); }
-    else { fx += (Math.sin(h * R) - fx) * 0.2; fy += (Math.cos(h * R) - fy) * 0.2; } // متوسط متجهي (ما يتأثر بقفزة 359→0)
-    oriN++;
-    rawH = (Math.atan2(fx, fy) / R + 360) % 360;
-    if (oriN === 1) { devHeading = rawH; render(); }
-    if (!turnRaf) turnRaf = requestAnimationFrame(turnTick);
+    if (pendingH) settleCalib(h);
+    gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.15 + 360) % 360);
+    render();
   }
   async function toggleTracking() {
     if (tracking) {
@@ -398,7 +399,6 @@
       removeEventListener('deviceorientation', onOri, true);
       removeEventListener('deviceorientationabsolute', onOri, true);
       tracking = false; trackBtn.classList.remove('on'); trackBtn.textContent = '📍'; trackBtn.title = 'تفعيل التتبع';
-      if (turnRaf) cancelAnimationFrame(turnRaf); turnRaf = 0; rawH = null; oriN = 0; turning = false;
       return;
     }
     try {
