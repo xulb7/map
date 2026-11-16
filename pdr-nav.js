@@ -13,6 +13,7 @@
     stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
+    followZoom: 1.6,      // مستوى التقريب عند تحديد موقعك (الحد الأقصى 3)
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -21,6 +22,7 @@
   let tracking = false, devHeading = null, pendingH = null, steps = 0;
   let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;
   let markerEl, arrowEl, stepsEl, trackBtn;
+  let following = false, focusT = null; // وضع تتبع الكاميرا لموقعك (مثل قوقل ماب)
 
   /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */
   const store = {
@@ -157,6 +159,7 @@
     if (matchesFloor()) {
       if (moved) updateRoute();
       render();
+      if (moved && following) focusOnUser();
     } else {
       hint('موقعك مسجّل في مبنى ' + posCtx.b + ' — ' + posCtx.f + '. إذا انتقلت لدور أو مبنى آخر امسح QR هناك لتحديث موقعك');
     }
@@ -202,6 +205,19 @@
     arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
   }
 
+  /* ---------- كاميرا التتبع: تقريب وتوسيط الخريطة على موقعك ---------- */
+  function focusOnUser(zoom) {
+    if (!matchesFloor()) return;
+    const v = viewMetrics();
+    if (zoom != null) scale = Math.min(Math.max(0.25, zoom), 3);
+    pointX = v.w / 2 - pos.x * scale;
+    pointY = v.topPad + (v.h - v.topPad) / 2 - pos.y * scale;
+    board.style.transition = 'transform .35s ease';
+    updateTransform();
+    clearTimeout(focusT);
+    focusT = setTimeout(() => { board.style.transition = 'none'; }, 400);
+  }
+
   function setPos(x, y, b, f) {
     const s = snap({ x, y }, graphFor(b, f));
     pos = s ? s.pt : { x, y };
@@ -243,6 +259,7 @@
       highlightAndRoute();
     }
     render(); updateRoute();
+    if (hasStart) { following = true; focusOnUser(CFG.followZoom); }
     return true;
   }
   function handleQrText(text) {
@@ -381,12 +398,17 @@
     document.head.appendChild(st);
     const bar = document.createElement('div');
     bar.className = 'pdr-bar';
-    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button>';
+    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button><button id="pdrFocus" title="العودة لموقعي" aria-label="العودة لموقعي">🎯</button>';
     document.body.appendChild(bar);
     trackBtn = bar.querySelector('#pdrTrack'); stepsEl = bar.querySelector('#pdrSteps');
     trackBtn.onclick = toggleTracking;
     bar.querySelector('#pdrScan').onclick = scanQr;
     bar.querySelector('#pdrCal').onclick = calibrate;
+    bar.querySelector('#pdrFocus').onclick = () => {
+      if (!pos) { toast('امسح QR (📷) لتحديد موقعك أولاً'); return; }
+      if (!matchesFloor()) { toast('موقعك في مبنى ' + posCtx.b + ' — ' + posCtx.f); return; }
+      following = true; focusOnUser(CFG.followZoom);
+    };
 
     markerEl = document.createElementNS(NS, 'g');
     markerEl.setAttribute('display', 'none');
@@ -397,7 +419,10 @@
 
   /* ---------- ربط بدون تعديل الكود الأصلي ---------- */
   const _render = window.renderBlueprint;
-  window.renderBlueprint = function () { _render.apply(this, arguments); render(); };
+  window.renderBlueprint = function () { _render.apply(this, arguments); render(); if (following && matchesFloor()) focusOnUser(CFG.followZoom); };
+
+  const _reset = window.resetZoom;
+  window.resetZoom = function () { following = false; _reset.apply(this, arguments); };
 
   const _clear = window.clearNavigation;
   window.clearNavigation = function () { dest = null; _clear.apply(this, arguments); };
@@ -412,6 +437,17 @@
   };
 
   buildUI();
+
+  // إذا سحبتِ الخريطة بإصبعك يتوقف التتبع التلقائي (ويرجع بزر 🎯 أو بمسح QR جديد)
+  (function () {
+    const w = document.getElementById('mapWrapper');
+    let sx = 0, sy = 0;
+    w.addEventListener('pointerdown', e => { sx = e.clientX; sy = e.clientY; });
+    w.addEventListener('pointermove', e => {
+      if (e.buttons && Math.hypot(e.clientX - sx, e.clientY - sy) > 8) { following = false; board.style.transition = 'none'; }
+    });
+    w.addEventListener('wheel', () => { following = false; }, { passive: true });
+  })();
 
   // محاكاة بالكيبورد للتجربة على الكمبيوتر: ↑ خطوة، ←/→ تدوير 15°
   addEventListener('keydown', e => {
