@@ -13,6 +13,9 @@
     stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
+    turnEase: 0.08,       // نعومة دوران الخريطة (أقل = أهدى)
+    turnDead: 3,          // أي تغير في الاتجاه أقل من هذي الدرجات يتجاهله (يمنع الرجفة)
+    turnMaxStep: 3,       // أقصى دوران بالدرجات في كل إطار (يمنع الدوخة)
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -231,7 +234,7 @@
     if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }
     markerEl.setAttribute('display', 'block');
     markerEl.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
-    arrowEl.setAttribute('transform', 'rotate(' + (followActive() ? 0 : mapHeading()) + ')');
+    arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
     syncFollow();
   }
 
@@ -351,13 +354,43 @@
     if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { lastStepT = t; onStep(); }
     d2 = d1; d1 = d;
   }
-  function onOri(e) {
-    let h = null;
-    if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
-    else if (e.absolute && e.alpha != null) h = (360 - e.alpha) % 360;
-    if (h == null) return;
-    gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.25 + 360) % 360);
+  /* اتجاه الجوال: يشتغل سواء كان الجوال مسطح أو واقف (يمنع القفزات العشوائية في أندرويد) */
+  function compassHeading(e) {
+    if (typeof e.webkitCompassHeading === 'number') return e.webkitCompassHeading;
+    if (!e.absolute || e.alpha == null) return null;
+    if (e.beta == null || e.gamma == null) return (360 - e.alpha) % 360;
+    const R = Math.PI / 180, z = e.alpha * R, x = e.beta * R, y = e.gamma * R;
+    const cZ = Math.cos(z), sZ = Math.sin(z), cX = Math.cos(x), sX = Math.sin(x), cY = Math.cos(y), sY = Math.sin(y);
+    let ex = -sZ * cX, ny = cZ * cX;                       // حافة الجوال العلوية (تثبت والجوال مسطح)
+    const w = Math.max(0, Math.min(1, (e.beta - 30) / 30)); // ظهر الجوال (يثبت والجوال واقف)
+    if (w > 0) { ex += w * (-cZ * sY - sZ * sX * cY); ny += w * (-sZ * sY + cZ * sX * cY); }
+    if (Math.hypot(ex, ny) < 0.05) return null;
+    return (Math.atan2(ex, ny) / R + 360) % 360;
+  }
+
+  let rawH = null, fx = 0, fy = 0, oriN = 0, turnRaf = 0, turning = false;
+  function turnTick() {
+    turnRaf = 0;
+    if (rawH == null || devHeading == null) return;
+    if (pendingH != null && oriN >= 8) { devHeading = rawH; setOffset(pendingH.b, devHeading - pendingH.h); pendingH = null; render(); }
+    const diff = angDiff(rawH, devHeading), ad = Math.abs(diff);
+    if (ad < (turning ? 0.6 : CFG.turnDead)) { turning = false; return; } // ثابت: لا نحرّك الخريطة
+    turning = true;
+    const step = Math.max(-CFG.turnMaxStep, Math.min(CFG.turnMaxStep, diff * CFG.turnEase));
+    devHeading = (devHeading + step + 360) % 360;
     render();
+    turnRaf = requestAnimationFrame(turnTick);
+  }
+  function onOri(e) {
+    const h = compassHeading(e);
+    if (h == null) return;
+    const R = Math.PI / 180;
+    if (oriN === 0) { fx = Math.sin(h * R); fy = Math.cos(h * R); }
+    else { fx += (Math.sin(h * R) - fx) * 0.2; fy += (Math.cos(h * R) - fy) * 0.2; } // متوسط متجهي (ما يتأثر بقفزة 359→0)
+    oriN++;
+    rawH = (Math.atan2(fx, fy) / R + 360) % 360;
+    if (oriN === 1) { devHeading = rawH; render(); }
+    if (!turnRaf) turnRaf = requestAnimationFrame(turnTick);
   }
   async function toggleTracking() {
     if (tracking) {
@@ -365,6 +398,7 @@
       removeEventListener('deviceorientation', onOri, true);
       removeEventListener('deviceorientationabsolute', onOri, true);
       tracking = false; trackBtn.classList.remove('on'); trackBtn.textContent = '📍'; trackBtn.title = 'تفعيل التتبع';
+      if (turnRaf) cancelAnimationFrame(turnRaf); turnRaf = 0; rawH = null; oriN = 0; turning = false;
       return;
     }
     try {
