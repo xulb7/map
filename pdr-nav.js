@@ -37,63 +37,6 @@
   const mapHeading = () => mapHeadingFor(selectedBldg);
   const matchesFloor = () => pos && posCtx && posCtx.b === selectedBldg && posCtx.f === selectedFloor;
 
-  /* ---------- وضع "الخريطة تدور معك" (Heading-up) مثل قوقل ماب ---------- */
-  let followMode = true, wasFollowing = false, followBtn = null, zoomedForFollow = false;
-  let viewH = null, rafId = 0, turning = false;
-  const followActive = () => followMode && devHeading != null && !pendingH && matchesFloor();
-
-  const FOLLOW_SCALE = 2.1; // تقريب مثل قوقل ماب (حوالي 30 بكسل لكل متر)
-  function visibleArea() { // المساحة الظاهرة فعلياً على الشاشة (مو طول الصفحة الكامل)
-    const v = viewMetrics(), vv = window.visualViewport;
-    return { w: Math.min(v.w, innerWidth, vv ? vv.width : 1e9), h: Math.min(v.h, innerHeight, vv ? vv.height : 1e9), topPad: v.topPad };
-  }
-  function setLook(on) { // يشيل الإطار ويخلي الخريطة مفتوحة بدون حدود
-    board.classList.toggle('following', on);
-    wrapper.classList.toggle('following-map', on);
-    const vg = document.getElementById('followVignette'); if (vg) vg.style.display = on ? 'block' : 'none';
-  }
-  function applyFollow() {
-    if (!followActive()) return false;
-    const v = visibleArea();
-    const ax = v.w / 2, ay = v.topPad + (v.h - v.topPad - 90) * 0.76; // موقعك في الجزء السفلي والمسافة قدامك
-    if (viewH == null) viewH = mapHeading();
-    const h = viewH;
-    if (!zoomedForFollow) { zoomedForFollow = true; scale = FOLLOW_SCALE; }
-    const a = -h * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
-    const px = pos.x * scale, py = pos.y * scale;
-    const tx = ax - (c * px - s * py), ty = ay - (s * px + c * py);
-    board.style.transform = 'translate(' + tx + 'px,' + ty + 'px) rotate(' + (-h) + 'deg) scale(' + scale + ')';
-    board.style.setProperty('--lbl-rot', h + 'deg'); // أسماء القاعات تبقى مستقيمة
-    return true;
-  }
-  const _ut = window.updateTransform;
-  window.updateTransform = function () { if (applyFollow()) { setLook(true); return; } setLook(false); board.style.setProperty('--lbl-rot', '0deg'); _ut.apply(this, arguments); };
-  const _zoomAt = window.zoomAt;
-  window.zoomAt = function (cx, cy, f) {
-    if (followActive()) { scale = Math.min(Math.max(1.2, scale * f), 4); updateTransform(); return; }
-    _zoomAt.apply(this, arguments);
-  };
-  // دوران هادئ: منطقة ميتة + تدرّج + حد أقصى للسرعة، فما تتأثر الخريطة برجفة البوصلة
-  function tickView() {
-    rafId = 0;
-    if (!followActive()) { viewH = null; turning = false; return; }
-    const d = angDiff(mapHeading(), viewH == null ? (viewH = mapHeading()) : viewH);
-    if (!turning && Math.abs(d) > 6) turning = true;
-    if (turning) {
-      if (Math.abs(d) < 1.5) turning = false;
-      else { viewH = (viewH + Math.max(-1.8, Math.min(1.8, d * 0.08)) + 360) % 360; updateTransform(); }
-    }
-    rafId = requestAnimationFrame(tickView);
-  }
-  function syncFollow() {
-    const now = followActive();
-    if (now && !rafId) rafId = requestAnimationFrame(tickView);
-    if (now) updateTransform();
-    else if (wasFollowing) { zoomedForFollow = false; viewH = null; fitToScreen(); }
-    wasFollowing = now;
-    if (followBtn) followBtn.classList.toggle('on', followMode);
-  }
-
   function proj(P, a, b) {
     const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
     let t = L2 ? ((P.x - a.x) * dx + (P.y - a.y) * dy) / L2 : 0;
@@ -256,8 +199,7 @@
     if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }
     markerEl.setAttribute('display', 'block');
     markerEl.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
-    arrowEl.setAttribute('transform', 'rotate(' + (followActive() ? angDiff(mapHeading(), viewH == null ? mapHeading() : viewH) : mapHeading()) + ')');
-    syncFollow();
+    arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
   }
 
   function setPos(x, y, b, f) {
@@ -293,8 +235,8 @@
     if (hasStart) {
       setPos(x, y, b, f);
       const h = parseFloat(p.get('h'));
-      if (!isNaN(h)) pendingH = { b, h, s: [], t0: Date.now() };
-      toast(pendingH ? 'تم تحديد موقعك… ثبّتي الجوال لحظة وواجهي الجدار' : 'تم تحديد موقعك');
+      if (!isNaN(h)) { if (devHeading != null) setOffset(b, devHeading - h); else pendingH = { b, h }; }
+      toast('تم تحديد موقعك');
     }
     if (rr && rr.b === selectedBldg && rr.f === selectedFloor) {
       document.getElementById('roomDropdown').value = rr.room.id;
@@ -363,27 +305,9 @@
   }
 
   /* ---------- المستشعرات ---------- */
-  function gotHeading(h) { devHeading = h; }
-  const circMean = a => { let x = 0, y = 0; a.forEach(v => { x += Math.cos(v * Math.PI / 180); y += Math.sin(v * Math.PI / 180); }); return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360; };
-  function settleCalib(raw) {
-    const c = pendingH, t = Date.now();
-    c.s.push(raw); if (c.s.length > 40) c.s.shift();
-    if (t - c.t0 < 1200 || c.s.length < 8) return;
-    const last = c.s.slice(-8), m = circMean(last);
-    const spread = Math.max.apply(null, last.map(v => Math.abs(angDiff(v, m))));
-    if (spread > 12 && t - c.t0 < 4000) return; // لسا البوصلة تتحرك — ننتظر تستقر
-    setOffset(c.b, m - c.h);
-    pendingH = null; viewH = null; turning = false;
-    render(); updateRoute();
-  }
-  // اتجاه الجوال مع تعويض الميلان (أندرويد): يستخدم أعلى الجوال إذا كان مسطحاً، وظهره إذا كان واقفاً
-  function tiltHeading(alpha, beta, gamma) {
-    const r = Math.PI / 180, a = alpha * r, b = (beta || 0) * r, g = (gamma || 0) * r;
-    const sa = Math.sin(a), ca = Math.cos(a), sb = Math.sin(b), cb = Math.cos(b), sg = Math.sin(g), cg = Math.cos(g);
-    const upright = Math.abs(beta || 0) > 50;
-    const E = upright ? (-ca * sg - sa * sb * cg) : (-sa * cb);
-    const N = upright ? (-sa * sg + ca * sb * cg) : (ca * cb);
-    return (Math.atan2(E, N) / r + 360) % 360;
+  function gotHeading(h) {
+    devHeading = h;
+    if (pendingH != null) { setOffset(pendingH.b, h - pendingH.h); pendingH = null; }
   }
   function onMotion(e) {
     const a = e.accelerationIncludingGravity;
@@ -397,10 +321,9 @@
   function onOri(e) {
     let h = null;
     if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
-    else if (e.absolute && e.alpha != null) h = tiltHeading(e.alpha, e.beta, e.gamma);
+    else if (e.absolute && e.alpha != null) h = (360 - e.alpha) % 360;
     if (h == null) return;
-    if (pendingH) settleCalib(h);
-    gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.15 + 360) % 360);
+    gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.25 + 360) % 360);
     render();
   }
   async function toggleTracking() {
@@ -452,26 +375,18 @@
       '.pdr-bar{position:fixed;left:calc(6px + env(safe-area-inset-left,0px));top:50%;transform:translateY(-50%);z-index:115;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}' +
       '.pdr-bar>*{pointer-events:auto}' +
       '.pdr-bar button{width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;background:var(--panel-bg,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-main,#f1f5f9);border-radius:50%;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:.92;-webkit-tap-highlight-color:transparent}' +
-      '.blueprint-board.following{border-color:transparent!important;background:transparent!important;border-radius:0!important;box-shadow:none!important}' +
-      '.map-wrapper.following-map{background:#070a12}' +
-      '#followVignette{position:fixed;inset:0;z-index:50;pointer-events:none;display:none;background:radial-gradient(ellipse 85% 75% at 50% 62%,transparent 40%,rgba(7,10,18,.92) 100%)}' +
-      '.room-node .lbl{display:block;white-space:pre-line;transform:rotate(var(--lbl-rot,0deg));pointer-events:none}' +
-      '.pdr-ask{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:410;background:#2563eb;color:#fff;border:0;border-radius:14px;padding:12px 20px;font-size:15px;font-family:inherit;box-shadow:0 6px 20px rgba(0,0,0,.5)}' +
       '.pdr-bar button.on{background:var(--primary-green,#10b981);opacity:1}' +
       '.pdr-bar span{font-size:10px;color:var(--text-sub,#94a3b8);background:var(--panel-bg,#1e293b);border-radius:8px;padding:2px 6px;opacity:.92}' +
       '.pdr-toast{position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:400;background:var(--panel-bg,#1e293b);color:var(--text-main,#f1f5f9);border:1px solid var(--primary-green,#10b981);padding:8px 16px;border-radius:10px;font-size:12px;max-width:90vw;text-align:center}';
     document.head.appendChild(st);
     const bar = document.createElement('div');
     bar.className = 'pdr-bar';
-    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button><button id="pdrFollow" class="on" title="الخريطة تدور معي" aria-label="الخريطة تدور معي">🔄</button>';
+    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button>';
     document.body.appendChild(bar);
     trackBtn = bar.querySelector('#pdrTrack'); stepsEl = bar.querySelector('#pdrSteps');
     trackBtn.onclick = toggleTracking;
     bar.querySelector('#pdrScan').onclick = scanQr;
     bar.querySelector('#pdrCal').onclick = calibrate;
-    const vg = document.createElement('div'); vg.id = 'followVignette'; document.body.appendChild(vg);
-    followBtn = bar.querySelector('#pdrFollow');
-    followBtn.onclick = () => { followMode = !followMode; toast(followMode ? 'الخريطة تدور معك' : 'الخريطة ثابتة'); render(); syncFollow(); };
 
     markerEl = document.createElementNS(NS, 'g');
     markerEl.setAttribute('display', 'none');
@@ -482,15 +397,7 @@
 
   /* ---------- ربط بدون تعديل الكود الأصلي ---------- */
   const _render = window.renderBlueprint;
-  window.renderBlueprint = function () {
-    _render.apply(this, arguments);
-    document.querySelectorAll('.room-node').forEach(n => {
-      if (n.querySelector('.lbl')) return;
-      const t = n.innerText, sp = document.createElement('span');
-      sp.className = 'lbl'; sp.textContent = t; n.textContent = ''; n.appendChild(sp);
-    });
-    render();
-  };
+  window.renderBlueprint = function () { _render.apply(this, arguments); render(); };
 
   const _clear = window.clearNavigation;
   window.clearNavigation = function () { dest = null; _clear.apply(this, arguments); };
@@ -516,21 +423,9 @@
     }
   });
 
-  // أندرويد: نشغّل البوصلة تلقائياً. آيفون: يلزم ضغطة واحدة (شرط من آبل)
-  function autoStartCompass() {
-    if (tracking) return;
-    const needsAsk = (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') ||
-                     (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function');
-    if (!needsAsk) { toggleTracking(); return; }
-    const b = document.createElement('button');
-    b.className = 'pdr-ask'; b.textContent = '🧭 اضغطي لتوجيه الخريطة حسب اتجاهك';
-    b.onclick = () => { b.remove(); toggleTracking(); };
-    document.body.appendChild(b);
-  }
-
   addEventListener('load', () => {
     const p = new URLSearchParams(location.search);
-    if ([...p.keys()].length && applyParams(p) && pos) autoStartCompass();
+    if ([...p.keys()].length) applyParams(p);
   });
 
   window.PDR = { cfg: CFG, setPos, calibrate, applyParams, scan: scanQr, graph: () => cur(), state: () => ({ pos, posCtx, dest, devHeading, steps }) };
