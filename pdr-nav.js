@@ -9,8 +9,12 @@
     strideM: 0.7,         // طول الخطوة بالمتر
     snapR: 12,            // نصف قطر البحث عن الممر
     minAlign: 0.35,       // أقل توافق بين اتجاه المشي واتجاه الممر
-    stepMinMs: 320,       // أقل زمن بين خطوتين
-    stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
+    stepMinMs: 300,       // أقل زمن بين خطوتين
+    stepMaxMs: 1100,      // أطول فاصل بين خطوتين يُعتبر مشياً طبيعياً
+    stepThresh: 1.0,      // حساسية كشف الخطوة (م/ث²)
+    stepMaxAcc: 9,        // فوق هذي القوة يُعتبر هز للجوال وليس خطوة
+    walkStreak: 2,        // عدد القمم المتتابعة بإيقاع مشي قبل ما نبدأ نحسب الخطوات
+    headingDead: 3,       // تجاهل تغيّر الاتجاه الأقل من هذي الدرجات (يمنع ارتجاف السهم)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
     followZoom: 1.6,      // مستوى التقريب عند تحديد موقعك (الحد الأقصى 3)
@@ -21,6 +25,7 @@
   let pos = null, posCtx = null, dest = null;
   let tracking = false, devHeading = null, pendingH = null, steps = 0;
   let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;
+  let lastPeakT = 0, streak = 0;
   let markerEl, arrowEl, stepsEl, trackBtn;
   let following = false, focusT = null; // وضع تتبع الكاميرا لموقعك (مثل قوقل ماب)
 
@@ -212,10 +217,12 @@
     if (zoom != null) scale = Math.min(Math.max(0.25, zoom), 3);
     pointX = v.w / 2 - pos.x * scale;
     pointY = v.topPad + (v.h - v.topPad) / 2 - pos.y * scale;
-    board.style.transition = 'transform .35s ease';
-    updateTransform();
     clearTimeout(focusT);
-    focusT = setTimeout(() => { board.style.transition = 'none'; }, 400);
+    if (zoom != null) { // تقريب ناعم عند تحديد الموقع فقط؛ أثناء المشي تتحرك الخريطة مع النقطة مباشرة
+      board.style.transition = 'transform .35s ease';
+      focusT = setTimeout(() => { board.style.transition = 'none'; }, 400);
+    } else board.style.transition = 'none';
+    updateTransform();
   }
 
   function setPos(x, y, b, f) {
@@ -332,15 +339,39 @@
     const m = Math.hypot(a.x, a.y, a.z);
     avg = avg * 0.9 + m * 0.1;
     const d = m - avg, t = performance.now();
-    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { lastStepT = t; onStep(); }
+    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastPeakT > CFG.stepMinMs) {
+      const gap = t - lastPeakT; lastPeakT = t;
+      if (d1 > CFG.stepMaxAcc || gap > CFG.stepMaxMs) streak = 0; // هز عنيف أو توقف: نبدأ العدّ من جديد
+      else {
+        streak++;
+        if (streak === CFG.walkStreak) { lastStepT = t; onStep(); onStep(); } // تأكدنا أنك تمشين: نحسب أول خطوتين
+        else if (streak > CFG.walkStreak) { lastStepT = t; onStep(); }
+      }
+    }
     d2 = d1; d1 = d;
+  }
+  // اتجاه ظهر الجوال مع تعويض الميلان (للجوال المرفوع وأنتِ تمشين)
+  function tiltHeading(alpha, beta, gamma) {
+    const r = Math.PI / 180, x = beta * r, y = (gamma || 0) * r, z = alpha * r;
+    const vx = -Math.cos(z) * Math.sin(y) - Math.sin(z) * Math.sin(x) * Math.cos(y);
+    const vy = -Math.sin(z) * Math.sin(y) + Math.cos(z) * Math.sin(x) * Math.cos(y);
+    let h = Math.atan(vx / vy);
+    if (vy < 0) h += Math.PI; else if (vx < 0) h += 2 * Math.PI;
+    return (h / r + 360) % 360;
   }
   function onOri(e) {
     let h = null;
     if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
-    else if (e.absolute && e.alpha != null) h = (360 - e.alpha) % 360;
+    else if (e.absolute && e.alpha != null) {
+      h = (e.beta != null && Math.abs(e.beta) > 25) ? tiltHeading(e.alpha, e.beta, e.gamma) : (360 - e.alpha) % 360;
+    }
     if (h == null) return;
-    gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.25 + 360) % 360);
+    if (devHeading != null) {
+      const diff = angDiff(h, devHeading);
+      if (Math.abs(diff) < CFG.headingDead) return; // اهتزاز بسيط: نتجاهله
+      h = (devHeading + diff * 0.2 + 360) % 360;
+    }
+    gotHeading(h);
     render();
   }
   async function toggleTracking() {
