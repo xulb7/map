@@ -42,13 +42,23 @@
   let viewH = null, rafId = 0, turning = false;
   const followActive = () => followMode && devHeading != null && !pendingH && matchesFloor();
 
+  const FOLLOW_SCALE = 2.1; // تقريب مثل قوقل ماب (حوالي 30 بكسل لكل متر)
+  function visibleArea() { // المساحة الظاهرة فعلياً على الشاشة (مو طول الصفحة الكامل)
+    const v = viewMetrics(), vv = window.visualViewport;
+    return { w: Math.min(v.w, innerWidth, vv ? vv.width : 1e9), h: Math.min(v.h, innerHeight, vv ? vv.height : 1e9), topPad: v.topPad };
+  }
+  function setLook(on) { // يشيل الإطار ويخلي الخريطة مفتوحة بدون حدود
+    board.classList.toggle('following', on);
+    wrapper.classList.toggle('following-map', on);
+    const vg = document.getElementById('followVignette'); if (vg) vg.style.display = on ? 'block' : 'none';
+  }
   function applyFollow() {
     if (!followActive()) return false;
-    const v = viewMetrics();
-    const ax = v.w / 2, ay = v.topPad + (v.h - v.topPad) * 0.68; // موقعك في الثلث السفلي والمسافة قدامك
+    const v = visibleArea();
+    const ax = v.w / 2, ay = v.topPad + (v.h - v.topPad - 90) * 0.76; // موقعك في الجزء السفلي والمسافة قدامك
     if (viewH == null) viewH = mapHeading();
     const h = viewH;
-    if (!zoomedForFollow) { zoomedForFollow = true; if (scale < 1) scale = 1; }
+    if (!zoomedForFollow) { zoomedForFollow = true; scale = FOLLOW_SCALE; }
     const a = -h * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
     const px = pos.x * scale, py = pos.y * scale;
     const tx = ax - (c * px - s * py), ty = ay - (s * px + c * py);
@@ -57,10 +67,10 @@
     return true;
   }
   const _ut = window.updateTransform;
-  window.updateTransform = function () { if (applyFollow()) return; board.style.setProperty('--lbl-rot', '0deg'); _ut.apply(this, arguments); };
+  window.updateTransform = function () { if (applyFollow()) { setLook(true); return; } setLook(false); board.style.setProperty('--lbl-rot', '0deg'); _ut.apply(this, arguments); };
   const _zoomAt = window.zoomAt;
   window.zoomAt = function (cx, cy, f) {
-    if (followActive()) { scale = Math.min(Math.max(0.25, scale * f), 3); updateTransform(); return; }
+    if (followActive()) { scale = Math.min(Math.max(1.2, scale * f), 4); updateTransform(); return; }
     _zoomAt.apply(this, arguments);
   };
   // دوران هادئ: منطقة ميتة + تدرّج + حد أقصى للسرعة، فما تتأثر الخريطة برجفة البوصلة
@@ -442,6 +452,9 @@
       '.pdr-bar{position:fixed;left:calc(6px + env(safe-area-inset-left,0px));top:50%;transform:translateY(-50%);z-index:115;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}' +
       '.pdr-bar>*{pointer-events:auto}' +
       '.pdr-bar button{width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;background:var(--panel-bg,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-main,#f1f5f9);border-radius:50%;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:.92;-webkit-tap-highlight-color:transparent}' +
+      '.blueprint-board.following{border-color:transparent!important;background:transparent!important;border-radius:0!important;box-shadow:none!important}' +
+      '.map-wrapper.following-map{background:#070a12}' +
+      '#followVignette{position:fixed;inset:0;z-index:50;pointer-events:none;display:none;background:radial-gradient(ellipse 85% 75% at 50% 62%,transparent 40%,rgba(7,10,18,.92) 100%)}' +
       '.room-node .lbl{display:block;white-space:pre-line;transform:rotate(var(--lbl-rot,0deg));pointer-events:none}' +
       '.pdr-ask{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:410;background:#2563eb;color:#fff;border:0;border-radius:14px;padding:12px 20px;font-size:15px;font-family:inherit;box-shadow:0 6px 20px rgba(0,0,0,.5)}' +
       '.pdr-bar button.on{background:var(--primary-green,#10b981);opacity:1}' +
@@ -456,6 +469,7 @@
     trackBtn.onclick = toggleTracking;
     bar.querySelector('#pdrScan').onclick = scanQr;
     bar.querySelector('#pdrCal').onclick = calibrate;
+    const vg = document.createElement('div'); vg.id = 'followVignette'; document.body.appendChild(vg);
     followBtn = bar.querySelector('#pdrFollow');
     followBtn.onclick = () => { followMode = !followMode; toast(followMode ? 'الخريطة تدور معك' : 'الخريطة ثابتة'); render(); syncFollow(); };
 
