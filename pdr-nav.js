@@ -16,7 +16,7 @@
     walkStreak: 2,        // عدد القمم المتتابعة بإيقاع مشي قبل ما نبدأ نحسب الخطوات
     headingDead: 3,       // تجاهل تغيّر الاتجاه الأقل من هذي الدرجات (يمنع ارتجاف السهم)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
-    arriveR: 18,          // مسافة الوصول (بكسل)
+    arriveR: 24,          // مسافة الوصول (بكسل) ≈ مترين تقريباً
     followZoom: 1.1,      // مستوى التقريب عند تحديد موقعك (الحد الأقصى 3)
     camPosTau: 0.15,      // نعومة حركة الكاميرا بالثواني (أقل = أسرع وأحدّ، أكثر = أنعم وأبطأ)
     camRotTau: 0.2,       // نعومة دوران الخريطة بالثواني
@@ -31,6 +31,7 @@
   let markerEl, arrowEl, stepsEl, trackBtn;
   let following = false, focusT = null; // وضع تتبع الكاميرا لموقعك (مثل قوقل ماب)
   let dpos = null, drot = 0, camRaf = 0, camT = 0; // موقع واتجاه الكاميرا المعروضين (ناعمين)
+  let arrived = false, arriveT = null, actx = null; // تنبيه الوصول + الصوت
   let rotateMode = (function () { try { return localStorage.getItem('pdr_rot') !== '0'; } catch (e) { return true; } })(); // الخريطة تدور معك
 
   /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */
@@ -186,9 +187,12 @@
     let len = 0;
     for (let i = 1; i < path.length; i++) len += dist(path[i - 1], path[i]);
     const info = document.getElementById('infoText');
-    info.innerText = dist(pos, dest) <= CFG.arriveR
-      ? 'وصلت إلى ' + dest.label
+    const near = dist(pos, dest) <= CFG.arriveR;
+    info.innerText = near
+      ? 'وصلتِ إلى ' + dest.label
       : dest.label + ' — المتبقي تقريباً ' + Math.round(len / CFG.pxPerM) + ' م';
+    if (near && !arrived) { arrived = true; notifyArrival(dest.label); }
+    else if (!near && arrived && dist(pos, dest) > CFG.arriveR * 1.6) arrived = false; // ابتعدتِ: نجهز التنبيه من جديد
   }
 
   // اتجاه أول مقطع من المسار الأخضر (بدرجات الخريطة: 0 = أعلى، 90 = يمين)
@@ -463,6 +467,54 @@
       : 'تمت معايرة مبنى ' + selectedBldg + ' على اتجاه المسار الأخضر');
   }
 
+  /* ---------- تنبيه الوصول: صوت + اهتزاز + رسالة ---------- */
+  // المتصفح لا يسمح بالصوت قبل لمسة من المستخدم، فنفعّله عند أول لمسة على الصفحة
+  function unlockAudio() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!actx) actx = new AC();
+      if (actx.state === 'suspended') actx.resume();
+    } catch (e) { /* ما في صوت */ }
+  }
+  ['pointerdown', 'touchend', 'click'].forEach(ev => addEventListener(ev, unlockAudio, { passive: true }));
+
+  function beep(freqs, dur) {
+    try {
+      if (!actx || actx.state !== 'running') return;
+      let t = actx.currentTime + 0.02;
+      freqs.forEach(f => {
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(actx.destination);
+        o.start(t); o.stop(t + dur + 0.02);
+        t += dur;
+      });
+    } catch (e) { /* ما في صوت */ }
+  }
+
+  function showArrival(label) {
+    let el = document.getElementById('pdrArrive');
+    if (el) el.remove();
+    el = document.createElement('div');
+    el.id = 'pdrArrive'; el.className = 'pdr-arrive';
+    el.innerHTML = '<b>🎉 وصلتِ إلى وجهتك</b><span></span><button>تمام</button>';
+    el.querySelector('span').textContent = label;
+    el.querySelector('button').onclick = () => el.remove();
+    document.body.appendChild(el);
+    clearTimeout(arriveT);
+    arriveT = setTimeout(() => el.remove(), 8000);
+  }
+
+  function notifyArrival(label) {
+    showArrival(label);
+    beep([660, 880, 1320], 0.18);
+    try { if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]); } catch (e) { /* الآيفون لا يدعم الاهتزاز */ }
+  }
+
   /* ---------- واجهة ---------- */
   function toast(msg) {
     const t = document.createElement('div');
@@ -478,6 +530,9 @@
       '.pdr-bar button{width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;background:var(--panel-bg,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-main,#f1f5f9);border-radius:50%;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:.92;-webkit-tap-highlight-color:transparent}' +
       '.pdr-bar button.on{background:var(--primary-green,#10b981);opacity:1}' +
       '.pdr-bar span{font-size:10px;color:var(--text-sub,#94a3b8);background:var(--panel-bg,#1e293b);border-radius:8px;padding:2px 6px;opacity:.92}' +
+      '.pdr-arrive{position:fixed;left:50%;top:90px;transform:translateX(-50%);z-index:410;background:var(--panel-bg,#1e293b);color:var(--text-main,#f1f5f9);border:2px solid var(--primary-green,#10b981);border-radius:14px;padding:14px 20px;min-width:220px;max-width:90vw;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.5)}' +
+      '.pdr-arrive span{font-size:18px;font-weight:800}' +
+      '.pdr-arrive button{margin-top:4px;padding:6px 20px;border:0;border-radius:10px;background:var(--primary-green,#10b981);color:#fff;font:inherit;cursor:pointer}' +
       '.pdr-toast{position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:400;background:var(--panel-bg,#1e293b);color:var(--text-main,#f1f5f9);border:1px solid var(--primary-green,#10b981);padding:8px 16px;border-radius:10px;font-size:12px;max-width:90vw;text-align:center}';
     document.head.appendChild(st);
     const bar = document.createElement('div');
@@ -535,14 +590,14 @@
   };
 
   const _clear = window.clearNavigation;
-  window.clearNavigation = function () { dest = null; _clear.apply(this, arguments); };
+  window.clearNavigation = function () { dest = null; arrived = false; _clear.apply(this, arguments); };
 
   const _hr = window.highlightAndRoute;
   window.highlightAndRoute = function () {
     _hr.apply(this, arguments);
     const id = document.getElementById('roomDropdown').value;
     const room = id && campusData[selectedBldg][selectedFloor].rooms.find(r => r.id === id);
-    if (room) { const q = lastPoint(room); dest = { x: q[0], y: q[1], label: room.label.replace('\n', ' ') }; updateRoute(); }
+    if (room) { const q = lastPoint(room); dest = { x: q[0], y: q[1], label: room.label.replace('\n', ' ') }; arrived = false; updateRoute(); }
     else dest = null;
   };
 
