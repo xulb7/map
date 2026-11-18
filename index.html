@@ -38,6 +38,7 @@
 
     <!-- قائمة القاعات -->
     <div class="search-select">
+      <input type="search" id="roomSearch" class="room-search" placeholder="ابحث بالكود أو الاسم..." oninput="filterRooms()" onkeydown="if(event.key==='Enter'){searchEnter();}" autocomplete="off">
       <select id="roomDropdown" onchange="highlightAndRoute()">
         <option value="">اختر القاعة...</option>
       </select>
@@ -121,9 +122,10 @@
     .tr-name{display:block;font-weight:700}
     .tr-mail{display:block;font-size:.85em;color:#38bdf8;direction:ltr;text-align:right;word-break:break-all}
     .tr-go{margin-top:10px;width:100%}
+    .room-search{width:100%;box-sizing:border-box;margin-bottom:6px;padding:8px 10px;border-radius:8px;border:1px solid rgba(128,128,128,.35);background:rgba(128,128,128,.12);color:inherit;font-family:inherit;font-size:16px}
   </style>
 
-  <script src="script.js?v=3"></script>
+  <script src="script.js?v=4"></script>
   <script src="pdr-nav.js?v=7"></script>
   <link rel="stylesheet" href="schedule.css">
 <script src="schedule.js"></script>

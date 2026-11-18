@@ -477,6 +477,94 @@ function renderFloorsMenu() {
   });
 }
 
+// أسماء القاعات (تُربط بالكود، مع تجاهل الأصفار الزائدة)
+const ROOM_NAMES_RAW = {
+  "B-S-04": "رئيسة قسم التقنية الإدارية",
+  "B-S-02": "معمل حاسب آلي",
+  "B-S-03": "مكتب أعضاء هيئة التدريب",
+  "B-S-11": "معمل حاسب آلي",
+  "B-S-01": "ورشة تدريبية",
+  "B-F-01": "النادي الطلابي",
+  "B-F-02": "معمل حاسب آلي",
+  "B-F-03": "مكتب أعضاء هيئة التدريب",
+  "B-F-04": "رئيسة قسم الدراسات العامة",
+  "B-F-15": "قاعة اجتماعات",
+  "B-F-16": "معمل حاسب آلي",
+  "B-F-11": "المكتبة",
+  "B-F-10": "ميني ماركت",
+  "B-F-13": "غرفة كهرباء",
+  "B-G-14": "وكيلة شؤون المتدربات",
+  "B-G-15": "وحدة القبول والتسجيل",
+  "B-G-11": "مستودع تقنية المعلومات",
+  "B-G-02": "وحدة التوجيه والإرشاد",
+  "B-G-01-2": "وحدة الصحة والسلامة",
+  "B-G-12": "معمل حاسب آلي",
+  "A-G-01": "معمل حاسب آلي",
+  "A-G-02": "معمل حاسب آلي",
+  "A-G-03": "معمل حاسب آلي",
+  "A-G-15": "وحدة التوجيه والإرشاد",
+  "A-G-05": "مخزن",
+  "A-G-07": "مديرة الشؤون المالية والإدارية",
+  "A-G-06": "نادي",
+  "A-G-09": "معمل حاسب آلي",
+  "A-F-05": "مكتب أعضاء هيئة التدريب",
+  "A-F-07": "رئيسة قسم الوسائط المتعددة + مكتب التصوير",
+  "A-F-09": "معمل حاسب آلي",
+  "A-F-16-3": "وكيلة التدريب",
+  "A-F-16": "الشؤون المالية والإدارية",
+  "A-F-06": "وكيلة الجودة",
+  "A-F-14": "غرفة الاجتماعات",
+  "A-F-13": "مكتب العميدة",
+  "A-F-12": "غرفة انتظار"
+};
+
+function normCode(c) {
+  return String(c).replace(/-0+(?=\d)/g, '-');
+}
+
+const ROOM_NAMES = {};
+Object.keys(ROOM_NAMES_RAW).forEach(k => { ROOM_NAMES[normCode(k)] = ROOM_NAMES_RAW[k]; });
+
+function roomDisplay(room) {
+  const name = ROOM_NAMES[normCode(room.id)];
+  return name ? `${room.id} (${name})` : room.label.replace('\n', ' ');
+}
+
+function normText(t) {
+  return normCode(String(t).toLowerCase().trim())
+    .replace(/[\u064B-\u0652\u0640]/g, '')
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي');
+}
+
+function filterRooms() {
+  const input = document.getElementById('roomSearch');
+  const dropdown = document.getElementById('roomDropdown');
+  if (!input || !dropdown) return;
+  const q = normText(input.value);
+  const current = dropdown.value;
+  dropdown.innerHTML = '<option value="">اختر القاعة...</option>';
+  campusData[selectedBldg][selectedFloor].rooms.forEach(room => {
+    const text = roomDisplay(room);
+    if (!q || normText(text).includes(q)) {
+      const opt = document.createElement('option');
+      opt.value = room.id;
+      opt.innerText = text;
+      dropdown.appendChild(opt);
+    }
+  });
+  if (Array.from(dropdown.options).some(o => o.value === current)) dropdown.value = current;
+}
+
+function searchEnter() {
+  const dropdown = document.getElementById('roomDropdown');
+  if (dropdown && dropdown.options.length > 1) {
+    dropdown.selectedIndex = 1;
+    highlightAndRoute();
+  }
+}
+
 function renderBlueprint() {
   const svgCorridors = document.getElementById('corridorSvg');
   const roomsLayer = document.getElementById('roomsContainer');
@@ -492,7 +580,7 @@ function renderBlueprint() {
     const node = document.createElement('div');
     node.className = `room-node ${room.type || ''}`;
     node.id = `node-${room.id}`;
-    node.innerText = room.label;
+    node.innerText = roomDisplay(room);
 
     node.style.left = room.x + 'px';
     node.style.top = room.y + 'px';
@@ -500,6 +588,8 @@ function renderBlueprint() {
     node.style.height = room.h + 'px';
 
     node.onclick = () => {
+      const s = document.getElementById('roomSearch');
+      if (s && s.value) { s.value = ''; filterRooms(); }
       dropdown.value = room.id;
       highlightAndRoute();
     };
@@ -508,9 +598,12 @@ function renderBlueprint() {
 
     const opt = document.createElement('option');
     opt.value = room.id;
-    opt.innerText = room.label.replace('\n', ' ');
+    opt.innerText = roomDisplay(room);
     dropdown.appendChild(opt);
   });
+
+  const rs = document.getElementById('roomSearch');
+  if (rs) rs.value = '';
 
   fitToScreen();
 }
@@ -546,7 +639,7 @@ function highlightAndRoute() {
     marker.setAttribute('transform', `translate(${lastPoint[0]}, ${lastPoint[1]})`);
     marker.style.display = 'block';
 
-    document.getElementById('infoText').innerText = `المسار المباشر نحو ${room.label.replace('\n', ' ')} (مبنى ${selectedBldg} - ${selectedFloor})`;
+    document.getElementById('infoText').innerText = `المسار المباشر نحو ${roomDisplay(room)} (مبنى ${selectedBldg} - ${selectedFloor})`;
     banner.style.display = 'flex';
   }
 }
@@ -590,103 +683,6 @@ function testQrScan(b, fl, rm) {
   
   setTimeout(() => {
     document.getElementById('roomDropdown').value = rm;
-    highlightAndRoute();
-  }, 100);
-}
-
-// ===== المدربات =====
-// لإضافة اسم ناقص: أضيفي سطر { name: "أ. الاسم", email: "..." } داخل people للمكتب المناسب (الإيميل اختياري)
-const trainersData = [
-  {
-    title: "مكتب أعضاء هيئة التدريب · دراسات عامة",
-    bldg: "B", floor: "الدور الأول", roomId: "B-F-03",
-    people: [
-      { name: "أ. خلود العتيبي", email: "kholouda@tvtc.gov.sa" },
-      { name: "أ. روان الجبر", email: "r.aljabr@tvtc.gov.sa" },
-      { name: "أ. طرفه الحميدي", email: "t.alhomaidi@tvtc.gov.sa" },
-      { name: "أ. شادية", email: "s.aljafry@tvtc.gov.sa" }
-    ]
-  },
-  {
-    title: "مكتب أعضاء هيئة التدريب · إدارة أعمال",
-    bldg: "B", floor: "الدور الثاني", roomId: "B-S-03",
-    people: [
-      { name: "أ. عبير السهلي", email: "abalsahli@tvtc.gov.sa" },
-      { name: "أ. غيداء الحمياني", email: "ghaida.a@tvtc.gov.sa" },
-      { name: "أ. فاطمه القحطاني" }
-    ]
-  },
-  {
-    title: "مكتب أعضاء هيئة التدريب · الحاسب وتقنية المعلومات",
-    bldg: "A", floor: "الدور الأول", roomId: "A-F-5",
-    people: [
-      { name: "أ. جواهر الميموني", email: "jawahera@tvtc.gov.sa" },
-      { name: "أ. فاتن" },
-      { name: "أ. أمل" }
-    ]
-  },
-  {
-    title: "رئيسة قسم التقنية الإدارية",
-    bldg: "B", floor: "الدور الثاني", roomId: "B-S-04",
-    people: [{ name: "أ. وضحى العوهلي", email: "w.alohali@tvtc.gov.sa" }]
-  },
-  {
-    title: "رئيسة قسم الدراسات العامة",
-    bldg: "B", floor: "الدور الأول", roomId: "B-F-04",
-    people: [{ name: "أ. الجوهرة الحربي" }]
-  },
-  {
-    title: "رئيسة قسم الوسائط المتعددة",
-    bldg: "A", floor: "الدور الأول", roomId: "A-F-7",
-    people: [{ name: "أ. مشاعل العتيبي", email: "mashael.a1@tvtc.gov.sa" }]
-  },
-  {
-    title: "وكيلة شؤون المتدربات",
-    bldg: "B", floor: "الدور الأرضي", roomId: "B-G-14",
-    people: [{ name: "أ. نواعس الزلفي", email: "nawaes.a@tvtc.gov.sa" }]
-  }
-];
-
-function openTrainers() {
-  const list = document.getElementById('trainersList');
-  list.innerHTML = '';
-
-  trainersData.forEach((g, i) => {
-    const people = g.people.map(p => `
-      <div class="tr-person">
-        <span class="tr-name">${p.name}</span>
-        ${p.email ? `<a class="tr-mail" href="mailto:${p.email}">${p.email}</a>` : ''}
-      </div>`).join('');
-
-    const card = document.createElement('div');
-    card.className = 'tr-card';
-    card.innerHTML = `
-      <span class="tr-title">${g.title}</span>
-      <span class="tr-office">مبنى ${g.bldg} · ${g.floor} · ${g.roomId}</span>
-      ${people}
-      <button class="test-btn tr-go" onclick="goToTrainerOffice(${i})">
-        <i class="fas fa-location-arrow"></i> دلّني على المكتب
-      </button>`;
-    list.appendChild(card);
-  });
-
-  document.getElementById('trainersModal').style.display = 'flex';
-}
-
-function closeTrainers() {
-  document.getElementById('trainersModal').style.display = 'none';
-}
-
-function goToTrainerOffice(i) {
-  const g = trainersData[i];
-  closeTrainers();
-  selectBuilding(g.bldg);
-  selectedFloor = g.floor;
-  renderFloorsMenu();
-  renderBlueprint();
-
-  setTimeout(() => {
-    document.getElementById('roomDropdown').value = g.roomId;
     highlightAndRoute();
   }, 100);
 }
