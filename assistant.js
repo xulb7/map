@@ -202,6 +202,13 @@
   function roomInfo(id) {
     var rooms = CONFIG.rooms || {}, k;
     for (k in rooms) { if (norm(k) === norm(id)) return rooms[k]; }
+    // أسماء الغرف المعرّفة في script.js (ROOM_NAMES_BY_KEY) — قراءة فقط
+    try {
+      if (typeof ROOM_NAMES_BY_KEY !== 'undefined') {
+        var nm = ROOM_NAMES_BY_KEY[String(id).toUpperCase().replace(/-0+(\d)/g, '-$1')];
+        if (nm) return { name: nm };
+      }
+    } catch (e) {}
     return null;
   }
 
@@ -241,11 +248,12 @@
           pushName(e.names, norm(id).replace(/-0+(\d)/g, '-$1'));  // B-F-07 = B-F-7
           if (extra && !(info && info.name)) {
             pushName(e.names, extra);
-            e.display = extra + ' (' + label + ')';
+            e.display = label + ' (' + extra + ')';
           } else if (info && info.name) {
             pushName(e.names, info.name);
+            if (extra) pushName(e.names, extra);
             (info.aliases || []).forEach(function (a) { pushName(e.names, a); });
-            e.display = info.name + ' (' + label + ')';
+            e.display = label + ' (' + info.name + ')';
           } else {
             e.display = label;
           }
