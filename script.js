@@ -448,73 +448,6 @@ function fitToScreen() {
   updateTransform();
 }
 
-// ===== أسماء الغرف (عرض فقط - لا تؤثر على الخريطة ولا المسارات) =====
-// الصيغة المعروضة: الكود (الاسم). الكود يبقى كما هو في الخريطة.
-const SHOW_NAME_ON_MAP = false; // غيّريها إلى true لو تبين الاسم يظهر داخل مربعات الخريطة نفسها
-
-const ROOM_NAMES = {
-  "B-S-04": "رئيسة قسم التقنية الإدارية",
-  "B-S-02": "معمل حاسب آلي",
-  "B-S-03": "مكتب أعضاء هيئة التدريب",
-  "B-S-11": "معمل حاسب آلي",
-  "B-S-01": "ورشة تدريبية",
-  "B-S-07": "دورة مياه",
-  "B-S-08": "دورة مياه",
-  "B-F-01": "النادي الطلابي",
-  "B-F-02": "معمل حاسب آلي",
-  "B-F-03": "مكتب أعضاء هيئة التدريب",
-  "B-F-04": "رئيسة قسم الدراسات العامة",
-  "B-F-15": "قاعة اجتماعات",
-  "B-F-16": "معمل حاسب آلي",
-  "B-F-11": "المكتبة",
-  "B-F-10": "ميني ماركت",
-  "B-F-13": "غرفة كهرباء",
-  "B-F-07": "دورة مياه",
-  "B-F-08": "دورة مياه",
-  "B-G-14": "وكيلة شؤون المتدربات",
-  "B-G-15": "وحدة القبول والتسجيل",
-  "B-G-11": "الصالة الرياضية",
-  "B-G-10": "مستودع",
-  "B-G-02": "وحدة التوجيه والإرشاد",
-  "B-G-01-2": "وحدة الصحة والسلامة",
-  "B-G-12": "معمل حاسب آلي",
-  "B-G-07": "دورة مياه",
-  "A-G-01": "معمل حاسب آلي",
-  "A-G-02": "معمل حاسب آلي",
-  "A-G-03": "معمل حاسب آلي",
-  "A-G-15": "وحدة التوجيه والإرشاد",
-  "A-G-05": "مخزن",
-  "A-G-07": "مديرة الشؤون المالية والإدارية",
-  "A-G-06": "نادي",
-  "A-G-09": "معمل حاسب آلي",
-  "A-F-05": "مكتب أعضاء هيئة التدريب",
-  "A-F-07": "رئيسة قسم الوسائط المتعددة + مكتب التصوير",
-  "A-F-09": "معمل حاسب آلي",
-  "A-F-16-3": "وكيلة التدريب",
-  "A-F-16": "الشؤون المالية والإدارية",
-  "A-F-06": "وكيلة الجودة",
-  "A-F-14": "غرفة الاجتماعات",
-  "A-F-13": "مكتب العميدة",
-  "A-F-12": "غرفة انتظار"
-};
-
-// الخريطة تكتب بعض الأكواد بدون صفر (A-G-1) وبعضها بصفر (B-F-07): نوحّدها للمطابقة فقط
-function codeKey(code) {
-  return String(code || '').toUpperCase().replace(/-0+(\d)/g, '-$1');
-}
-const ROOM_NAMES_BY_KEY = {};
-Object.keys(ROOM_NAMES).forEach(c => { ROOM_NAMES_BY_KEY[codeKey(c)] = ROOM_NAMES[c]; });
-
-function roomName(room) {
-  return ROOM_NAMES_BY_KEY[codeKey(room.id)] || '';
-}
-
-// النص المعروض: الكود (الاسم) — الغرفة بدون اسم تبقى كما هي
-function roomLabel(room) {
-  const name = roomName(room);
-  return name ? `${room.id} (${name})` : room.label.replace('\n', ' ');
-}
-
 function selectBuilding(b) {
   selectedBldg = b;
   document.getElementById('bldg-A').classList.toggle('active', b === 'A');
@@ -559,7 +492,7 @@ function renderBlueprint() {
     const node = document.createElement('div');
     node.className = `room-node ${room.type || ''}`;
     node.id = `node-${room.id}`;
-    node.innerText = SHOW_NAME_ON_MAP ? roomLabel(room) : room.label;
+    node.innerText = room.label;
 
     node.style.left = room.x + 'px';
     node.style.top = room.y + 'px';
@@ -575,7 +508,7 @@ function renderBlueprint() {
 
     const opt = document.createElement('option');
     opt.value = room.id;
-    opt.innerText = roomLabel(room);
+    opt.innerText = room.label.replace('\n', ' ');
     dropdown.appendChild(opt);
   });
 
@@ -613,7 +546,7 @@ function highlightAndRoute() {
     marker.setAttribute('transform', `translate(${lastPoint[0]}, ${lastPoint[1]})`);
     marker.style.display = 'block';
 
-    document.getElementById('infoText').innerText = `المسار المباشر نحو ${roomLabel(room)} (مبنى ${selectedBldg} - ${selectedFloor})`;
+    document.getElementById('infoText').innerText = `المسار المباشر نحو ${room.label.replace('\n', ' ')} (مبنى ${selectedBldg} - ${selectedFloor})`;
     banner.style.display = 'flex';
   }
 }

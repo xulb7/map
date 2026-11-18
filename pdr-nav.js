@@ -390,6 +390,7 @@
 
     markerEl = document.createElementNS(NS, 'g');
     markerEl.setAttribute('display', 'none');
+    markerEl.id = 'pdrMarker'; // يستخدمه nav-mode.js لإخفاء المؤشر القديم أثناء التنقل
     markerEl.innerHTML = '<circle r="22" fill="rgba(37,99,235,.35)" class="ping-ring"/><g id="pdrArrow"><polygon points="0,-22 9,-8 -9,-8" fill="#60a5fa"/></g><circle r="9" fill="#2563eb" stroke="#fff" stroke-width="3"/>';
     document.getElementById('navigationSvg').appendChild(markerEl);
     arrowEl = markerEl.querySelector('#pdrArrow');
@@ -428,5 +429,11 @@
     if ([...p.keys()].length) applyParams(p);
   });
 
-  window.PDR = { cfg: CFG, setPos, calibrate, applyParams, scan: scanQr, graph: () => cur(), state: () => ({ pos, posCtx, dest, devHeading, steps }) };
+  window.PDR = {
+    cfg: CFG, setPos, calibrate, applyParams, scan: scanQr, graph: () => cur(),
+    state: () => ({ pos, posCtx, dest, devHeading, steps }),
+    // مضافة لوضع التنقل (nav-mode.js)
+    heading: mapHeading, matches: matchesFloor, routeDirection,
+    isTracking: () => tracking, toggleTracking
+  };
 })();
