@@ -593,3 +593,100 @@ function testQrScan(b, fl, rm) {
     highlightAndRoute();
   }, 100);
 }
+
+// ===== المدربات =====
+// لإضافة اسم ناقص: أضيفي سطر { name: "أ. الاسم", email: "..." } داخل people للمكتب المناسب (الإيميل اختياري)
+const trainersData = [
+  {
+    title: "مكتب أعضاء هيئة التدريب · دراسات عامة",
+    bldg: "B", floor: "الدور الأول", roomId: "B-F-03",
+    people: [
+      { name: "أ. خلود العتيبي", email: "kholouda@tvtc.gov.sa" },
+      { name: "أ. روان الجبر", email: "r.aljabr@tvtc.gov.sa" },
+      { name: "أ. طرفه الحميدي", email: "t.alhomaidi@tvtc.gov.sa" },
+      { name: "أ. شادية", email: "s.aljafry@tvtc.gov.sa" }
+    ]
+  },
+  {
+    title: "مكتب أعضاء هيئة التدريب · إدارة أعمال",
+    bldg: "B", floor: "الدور الثاني", roomId: "B-S-03",
+    people: [
+      { name: "أ. عبير السهلي", email: "abalsahli@tvtc.gov.sa" },
+      { name: "أ. غيداء الحمياني", email: "ghaida.a@tvtc.gov.sa" },
+      { name: "أ. فاطمه القحطاني" }
+    ]
+  },
+  {
+    title: "مكتب أعضاء هيئة التدريب · الحاسب وتقنية المعلومات",
+    bldg: "A", floor: "الدور الأول", roomId: "A-F-5",
+    people: [
+      { name: "أ. جواهر الميموني", email: "jawahera@tvtc.gov.sa" },
+      { name: "أ. فاتن" },
+      { name: "أ. أمل" }
+    ]
+  },
+  {
+    title: "رئيسة قسم التقنية الإدارية",
+    bldg: "B", floor: "الدور الثاني", roomId: "B-S-04",
+    people: [{ name: "أ. وضحى العوهلي", email: "w.alohali@tvtc.gov.sa" }]
+  },
+  {
+    title: "رئيسة قسم الدراسات العامة",
+    bldg: "B", floor: "الدور الأول", roomId: "B-F-04",
+    people: [{ name: "أ. الجوهرة الحربي" }]
+  },
+  {
+    title: "رئيسة قسم الوسائط المتعددة",
+    bldg: "A", floor: "الدور الأول", roomId: "A-F-7",
+    people: [{ name: "أ. مشاعل العتيبي", email: "mashael.a1@tvtc.gov.sa" }]
+  },
+  {
+    title: "وكيلة شؤون المتدربات",
+    bldg: "B", floor: "الدور الأرضي", roomId: "B-G-14",
+    people: [{ name: "أ. نواعس الزلفي", email: "nawaes.a@tvtc.gov.sa" }]
+  }
+];
+
+function openTrainers() {
+  const list = document.getElementById('trainersList');
+  list.innerHTML = '';
+
+  trainersData.forEach((g, i) => {
+    const people = g.people.map(p => `
+      <div class="tr-person">
+        <span class="tr-name">${p.name}</span>
+        ${p.email ? `<a class="tr-mail" href="mailto:${p.email}">${p.email}</a>` : ''}
+      </div>`).join('');
+
+    const card = document.createElement('div');
+    card.className = 'tr-card';
+    card.innerHTML = `
+      <span class="tr-title">${g.title}</span>
+      <span class="tr-office">مبنى ${g.bldg} · ${g.floor} · ${g.roomId}</span>
+      ${people}
+      <button class="test-btn tr-go" onclick="goToTrainerOffice(${i})">
+        <i class="fas fa-location-arrow"></i> دلّني على المكتب
+      </button>`;
+    list.appendChild(card);
+  });
+
+  document.getElementById('trainersModal').style.display = 'flex';
+}
+
+function closeTrainers() {
+  document.getElementById('trainersModal').style.display = 'none';
+}
+
+function goToTrainerOffice(i) {
+  const g = trainersData[i];
+  closeTrainers();
+  selectBuilding(g.bldg);
+  selectedFloor = g.floor;
+  renderFloorsMenu();
+  renderBlueprint();
+
+  setTimeout(() => {
+    document.getElementById('roomDropdown').value = g.roomId;
+    highlightAndRoute();
+  }, 100);
+}
