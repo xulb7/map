@@ -46,10 +46,6 @@
     <button class="qr-btn" onclick="openQrModal()">
       <i class="fas fa-qrcode"></i> الباركود
     </button>
-
-    <button class="qr-btn" onclick="openTrainers()">
-      <i class="fas fa-user-tie"></i> المدربات
-    </button>
   </header>
 
   <!-- مساحة الخريطة مع إمكانية السحب والتكبير -->
@@ -102,29 +98,8 @@
     </div>
   </div>
 
-  <!-- نافذة المدربات -->
-  <div id="trainersModal" class="modal-overlay">
-    <div class="modal-content">
-      <h3>المدربات</h3>
-      <div id="trainersList" class="tr-list"></div>
-      <div class="modal-actions">
-        <button onclick="closeTrainers()" class="close-btn">إغلاق</button>
-      </div>
-    </div>
-  </div>
-  <style>
-    .tr-list{max-height:60vh;overflow-y:auto;margin:12px 0;text-align:right}
-    .tr-card{border:1px solid rgba(128,128,128,.35);background:rgba(128,128,128,.12);border-radius:12px;padding:12px;margin-bottom:10px}
-    .tr-title{display:block;font-weight:800}
-    .tr-office{display:block;font-size:.85em;opacity:.75;margin-top:2px}
-    .tr-person{margin-top:8px;padding-top:8px;border-top:1px dashed rgba(128,128,128,.3)}
-    .tr-name{display:block;font-weight:700}
-    .tr-mail{display:block;font-size:.85em;color:#38bdf8;direction:ltr;text-align:right;word-break:break-all}
-    .tr-go{margin-top:10px;width:100%}
-  </style>
-
-  <script src="script.js?v=5"></script>
-  <script src="pdr-nav.js?v=7"></script>
+  <script src="script.js?v=2"></script>
+  <script src="pdr-nav.js?v=2"></script>
   <link rel="stylesheet" href="schedule.css">
 <script src="schedule.js"></script>
   <script src="assistant.js" defer></script>

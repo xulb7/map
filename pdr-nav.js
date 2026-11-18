@@ -9,17 +9,10 @@
     strideM: 0.7,         // طول الخطوة بالمتر
     snapR: 12,            // نصف قطر البحث عن الممر
     minAlign: 0.35,       // أقل توافق بين اتجاه المشي واتجاه الممر
-    stepMinMs: 300,       // أقل زمن بين خطوتين
-    stepMaxMs: 1100,      // أطول فاصل بين خطوتين يُعتبر مشياً طبيعياً
-    stepThresh: 1.0,      // حساسية كشف الخطوة (م/ث²)
-    stepMaxAcc: 9,        // فوق هذي القوة يُعتبر هز للجوال وليس خطوة
-    walkStreak: 2,        // عدد القمم المتتابعة بإيقاع مشي قبل ما نبدأ نحسب الخطوات
-    headingDead: 3,       // تجاهل تغيّر الاتجاه الأقل من هذي الدرجات (يمنع ارتجاف السهم)
+    stepMinMs: 320,       // أقل زمن بين خطوتين
+    stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
-    arriveR: 24,          // مسافة الوصول (بكسل) ≈ مترين تقريباً
-    followZoom: 1.1,      // مستوى التقريب عند تحديد موقعك (الحد الأقصى 3)
-    camPosTau: 0.15,      // نعومة حركة الكاميرا بالثواني (أقل = أسرع وأحدّ، أكثر = أنعم وأبطأ)
-    camRotTau: 0.2,       // نعومة دوران الخريطة بالثواني
+    arriveR: 18,          // مسافة الوصول (بكسل)
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -27,12 +20,7 @@
   let pos = null, posCtx = null, dest = null;
   let tracking = false, devHeading = null, pendingH = null, steps = 0;
   let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;
-  let lastPeakT = 0, streak = 0;
   let markerEl, arrowEl, stepsEl, trackBtn;
-  let following = false, focusT = null; // وضع تتبع الكاميرا لموقعك (مثل قوقل ماب)
-  let dpos = null, drot = 0, camRaf = 0, camT = 0; // موقع واتجاه الكاميرا المعروضين (ناعمين)
-  let arrived = false, arriveT = null, actx = null; // تنبيه الوصول + الصوت
-  let rotateMode = (function () { try { return localStorage.getItem('pdr_rot') !== '0'; } catch (e) { return true; } })(); // الخريطة تدور معك
 
   /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */
   const store = {
@@ -169,7 +157,6 @@
     if (matchesFloor()) {
       if (moved) updateRoute();
       render();
-      if (moved && following) camKick();
     } else {
       hint('موقعك مسجّل في مبنى ' + posCtx.b + ' — ' + posCtx.f + '. إذا انتقلت لدور أو مبنى آخر امسح QR هناك لتحديث موقعك');
     }
@@ -187,12 +174,9 @@
     let len = 0;
     for (let i = 1; i < path.length; i++) len += dist(path[i - 1], path[i]);
     const info = document.getElementById('infoText');
-    const near = dist(pos, dest) <= CFG.arriveR;
-    info.innerText = near
-      ? 'وصلتِ إلى ' + dest.label
+    info.innerText = dist(pos, dest) <= CFG.arriveR
+      ? 'وصلت إلى ' + dest.label
       : dest.label + ' — المتبقي تقريباً ' + Math.round(len / CFG.pxPerM) + ' م';
-    if (near && !arrived) { arrived = true; notifyArrival(dest.label); }
-    else if (!near && arrived && dist(pos, dest) > CFG.arriveR * 1.6) arrived = false; // ابتعدتِ: نجهز التنبيه من جديد
   }
 
   // اتجاه أول مقطع من المسار الأخضر (بدرجات الخريطة: 0 = أعلى، 90 = يمين)
@@ -213,72 +197,9 @@
   function render() {
     if (!markerEl) return;
     if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }
-    const q = (following && dpos) ? dpos : pos;
     markerEl.setAttribute('display', 'block');
-    markerEl.setAttribute('transform', 'translate(' + q.x + ',' + q.y + ')');
+    markerEl.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
     arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
-  }
-
-  /* ---------- كاميرا التتبع (مثل قوقل ماب): توسيط + تقريب + دوران ناعم ---------- */
-  const anchorFor = v => ({ x: v.w / 2, y: v.topPad + (v.h - v.topPad) * (rotateMode ? 0.62 : 0.5) });
-
-  function applyCam() {
-    const v = viewMetrics(), a = anchorFor(v);
-    if (rotateMode) {
-      // نقطتك تثبت على نقطة الارتكاز، والخريطة تدور بحيث اتجاه مشيك يكون لفوق
-      board.style.transform = 'translate(' + a.x + 'px,' + a.y + 'px) rotate(' + (-drot) + 'deg) scale(' + scale + ') translate(' + (-dpos.x) + 'px,' + (-dpos.y) + 'px)';
-      // نحفظ قيم السحب بحيث لو خرجتِ من التتبع تبقى الخريطة مركّزة عليك
-      pointX = v.w / 2 - dpos.x * scale;
-      pointY = v.topPad + (v.h - v.topPad) / 2 - dpos.y * scale;
-    } else {
-      pointX = a.x - dpos.x * scale;
-      pointY = a.y - dpos.y * scale;
-      _ut();
-    }
-  }
-
-  function camTick(ts) {
-    camRaf = 0;
-    if (!following || !pos || !matchesFloor() || !dpos) return;
-    const dt = camT ? Math.min(0.1, (ts - camT) / 1000) : 0.016;
-    camT = ts;
-    const kp = 1 - Math.exp(-dt / CFG.camPosTau), kr = 1 - Math.exp(-dt / CFG.camRotTau);
-    dpos.x += (pos.x - dpos.x) * kp;
-    dpos.y += (pos.y - dpos.y) * kp;
-    const target = mapHeading();
-    drot = (drot + angDiff(target, drot) * kr + 360) % 360;
-    render();
-    applyCam();
-    if (dist(dpos, pos) > 0.2 || Math.abs(angDiff(target, drot)) > 0.5) camRaf = requestAnimationFrame(camTick);
-    else camT = 0;
-  }
-
-  function camKick() { if (following && !camRaf) camRaf = requestAnimationFrame(camTick); }
-
-  function startFollow(zoom) {
-    if (!matchesFloor()) return;
-    following = true;
-    dpos = { x: pos.x, y: pos.y };
-    drot = mapHeading();
-    if (zoom != null) scale = Math.min(Math.max(0.25, zoom), 3);
-    clearTimeout(focusT);
-    board.style.transition = 'transform .6s ease'; // دخول ناعم عند تحديد الموقع
-    focusT = setTimeout(() => { board.style.transition = 'none'; }, 650);
-    render();
-    applyCam();
-    camT = 0;
-    camKick();
-  }
-
-  function stopFollow() {
-    if (!following) return;
-    following = false;
-    cancelAnimationFrame(camRaf); camRaf = 0; camT = 0;
-    clearTimeout(focusT);
-    board.style.transition = 'transform .3s ease';
-    focusT = setTimeout(() => { board.style.transition = 'none'; }, 350);
-    window.updateTransform(); // يرجع للعرض العادي (الشمال فوق) وهو مركّز عليك
-    render();
   }
 
   function setPos(x, y, b, f) {
@@ -322,7 +243,6 @@
       highlightAndRoute();
     }
     render(); updateRoute();
-    if (hasStart) startFollow(CFG.followZoom);
     return true;
   }
   function handleQrText(text) {
@@ -395,41 +315,16 @@
     const m = Math.hypot(a.x, a.y, a.z);
     avg = avg * 0.9 + m * 0.1;
     const d = m - avg, t = performance.now();
-    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastPeakT > CFG.stepMinMs) {
-      const gap = t - lastPeakT; lastPeakT = t;
-      if (d1 > CFG.stepMaxAcc || gap > CFG.stepMaxMs) streak = 0; // هز عنيف أو توقف: نبدأ العدّ من جديد
-      else {
-        streak++;
-        if (streak === CFG.walkStreak) { lastStepT = t; onStep(); onStep(); } // تأكدنا أنك تمشين: نحسب أول خطوتين
-        else if (streak > CFG.walkStreak) { lastStepT = t; onStep(); }
-      }
-    }
+    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { lastStepT = t; onStep(); }
     d2 = d1; d1 = d;
-  }
-  // اتجاه ظهر الجوال مع تعويض الميلان (للجوال المرفوع وأنتِ تمشين)
-  function tiltHeading(alpha, beta, gamma) {
-    const r = Math.PI / 180, x = beta * r, y = (gamma || 0) * r, z = alpha * r;
-    const vx = -Math.cos(z) * Math.sin(y) - Math.sin(z) * Math.sin(x) * Math.cos(y);
-    const vy = -Math.sin(z) * Math.sin(y) + Math.cos(z) * Math.sin(x) * Math.cos(y);
-    let h = Math.atan(vx / vy);
-    if (vy < 0) h += Math.PI; else if (vx < 0) h += 2 * Math.PI;
-    return (h / r + 360) % 360;
   }
   function onOri(e) {
     let h = null;
     if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
-    else if (e.absolute && e.alpha != null) {
-      h = (e.beta != null && Math.abs(e.beta) > 25) ? tiltHeading(e.alpha, e.beta, e.gamma) : (360 - e.alpha) % 360;
-    }
+    else if (e.absolute && e.alpha != null) h = (360 - e.alpha) % 360;
     if (h == null) return;
-    if (devHeading != null) {
-      const diff = angDiff(h, devHeading);
-      if (Math.abs(diff) < CFG.headingDead) return; // اهتزاز بسيط: نتجاهله
-      h = (devHeading + diff * 0.2 + 360) % 360;
-    }
-    gotHeading(h);
+    gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.25 + 360) % 360);
     render();
-    camKick();
   }
   async function toggleTracking() {
     if (tracking) {
@@ -467,54 +362,6 @@
       : 'تمت معايرة مبنى ' + selectedBldg + ' على اتجاه المسار الأخضر');
   }
 
-  /* ---------- تنبيه الوصول: صوت + اهتزاز + رسالة ---------- */
-  // المتصفح لا يسمح بالصوت قبل لمسة من المستخدم، فنفعّله عند أول لمسة على الصفحة
-  function unlockAudio() {
-    try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      if (!actx) actx = new AC();
-      if (actx.state === 'suspended') actx.resume();
-    } catch (e) { /* ما في صوت */ }
-  }
-  ['pointerdown', 'touchend', 'click'].forEach(ev => addEventListener(ev, unlockAudio, { passive: true }));
-
-  function beep(freqs, dur) {
-    try {
-      if (!actx || actx.state !== 'running') return;
-      let t = actx.currentTime + 0.02;
-      freqs.forEach(f => {
-        const o = actx.createOscillator(), g = actx.createGain();
-        o.type = 'sine'; o.frequency.value = f;
-        g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-        o.connect(g); g.connect(actx.destination);
-        o.start(t); o.stop(t + dur + 0.02);
-        t += dur;
-      });
-    } catch (e) { /* ما في صوت */ }
-  }
-
-  function showArrival(label) {
-    let el = document.getElementById('pdrArrive');
-    if (el) el.remove();
-    el = document.createElement('div');
-    el.id = 'pdrArrive'; el.className = 'pdr-arrive';
-    el.innerHTML = '<b>🎉 وصلتِ إلى وجهتك</b><span></span><button>تمام</button>';
-    el.querySelector('span').textContent = label;
-    el.querySelector('button').onclick = () => el.remove();
-    document.body.appendChild(el);
-    clearTimeout(arriveT);
-    arriveT = setTimeout(() => el.remove(), 8000);
-  }
-
-  function notifyArrival(label) {
-    showArrival(label);
-    beep([660, 880, 1320], 0.18);
-    try { if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]); } catch (e) { /* الآيفون لا يدعم الاهتزاز */ }
-  }
-
   /* ---------- واجهة ---------- */
   function toast(msg) {
     const t = document.createElement('div');
@@ -530,38 +377,16 @@
       '.pdr-bar button{width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;background:var(--panel-bg,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-main,#f1f5f9);border-radius:50%;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:.92;-webkit-tap-highlight-color:transparent}' +
       '.pdr-bar button.on{background:var(--primary-green,#10b981);opacity:1}' +
       '.pdr-bar span{font-size:10px;color:var(--text-sub,#94a3b8);background:var(--panel-bg,#1e293b);border-radius:8px;padding:2px 6px;opacity:.92}' +
-      '.pdr-arrive{position:fixed;left:50%;top:90px;transform:translateX(-50%);z-index:410;background:var(--panel-bg,#1e293b);color:var(--text-main,#f1f5f9);border:2px solid var(--primary-green,#10b981);border-radius:14px;padding:14px 20px;min-width:220px;max-width:90vw;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.5)}' +
-      '.pdr-arrive span{font-size:18px;font-weight:800}' +
-      '.pdr-arrive button{margin-top:4px;padding:6px 20px;border:0;border-radius:10px;background:var(--primary-green,#10b981);color:#fff;font:inherit;cursor:pointer}' +
       '.pdr-toast{position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:400;background:var(--panel-bg,#1e293b);color:var(--text-main,#f1f5f9);border:1px solid var(--primary-green,#10b981);padding:8px 16px;border-radius:10px;font-size:12px;max-width:90vw;text-align:center}';
     document.head.appendChild(st);
     const bar = document.createElement('div');
     bar.className = 'pdr-bar';
-    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button><button id="pdrFocus" title="العودة لموقعي" aria-label="العودة لموقعي">🎯</button><button id="pdrRot" title="تدوير الخريطة معي" aria-label="تدوير الخريطة معي">🔄</button>';
+    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button>';
     document.body.appendChild(bar);
     trackBtn = bar.querySelector('#pdrTrack'); stepsEl = bar.querySelector('#pdrSteps');
     trackBtn.onclick = toggleTracking;
     bar.querySelector('#pdrScan').onclick = scanQr;
     bar.querySelector('#pdrCal').onclick = calibrate;
-    bar.querySelector('#pdrFocus').onclick = () => {
-      if (!pos) { toast('امسح QR (📷) لتحديد موقعك أولاً'); return; }
-      if (!matchesFloor()) { toast('موقعك في مبنى ' + posCtx.b + ' — ' + posCtx.f); return; }
-      startFollow(CFG.followZoom);
-    };
-    const rotBtn = bar.querySelector('#pdrRot');
-    rotBtn.classList.toggle('on', rotateMode);
-    rotBtn.onclick = () => {
-      rotateMode = !rotateMode;
-      try { localStorage.setItem('pdr_rot', rotateMode ? '1' : '0'); } catch (e) { /* سفاري الخاص */ }
-      rotBtn.classList.toggle('on', rotateMode);
-      toast(rotateMode ? 'الخريطة تدور معك' : 'الخريطة ثابتة والشمال فوق');
-      if (following && matchesFloor()) {
-        clearTimeout(focusT);
-        board.style.transition = 'transform .4s ease';
-        focusT = setTimeout(() => { board.style.transition = 'none'; }, 450);
-        applyCam(); camKick();
-      }
-    };
 
     markerEl = document.createElementNS(NS, 'g');
     markerEl.setAttribute('display', 'none');
@@ -572,53 +397,21 @@
 
   /* ---------- ربط بدون تعديل الكود الأصلي ---------- */
   const _render = window.renderBlueprint;
-  window.renderBlueprint = function () { _render.apply(this, arguments); render(); if (following && matchesFloor()) startFollow(CFG.followZoom); };
-
-  const _reset = window.resetZoom;
-  window.resetZoom = function () { stopFollow(); _reset.apply(this, arguments); };
-
-  // أثناء التتبع: التكبير والتصغير وتدوير الشاشة يمرّون على الكاميرا بدل ما يكسرون الدوران
-  const _ut = window.updateTransform;
-  window.updateTransform = function () {
-    if (following && pos && matchesFloor() && dpos) { applyCam(); return; }
-    _ut.apply(this, arguments);
-  };
-  const _fit = window.fitToScreen;
-  window.fitToScreen = function () {
-    _fit.apply(this, arguments);
-    if (following && matchesFloor() && dpos) { scale = Math.min(Math.max(0.25, CFG.followZoom), 3); applyCam(); camKick(); }
-  };
+  window.renderBlueprint = function () { _render.apply(this, arguments); render(); };
 
   const _clear = window.clearNavigation;
-  window.clearNavigation = function () { dest = null; arrived = false; _clear.apply(this, arguments); };
+  window.clearNavigation = function () { dest = null; _clear.apply(this, arguments); };
 
   const _hr = window.highlightAndRoute;
   window.highlightAndRoute = function () {
     _hr.apply(this, arguments);
     const id = document.getElementById('roomDropdown').value;
     const room = id && campusData[selectedBldg][selectedFloor].rooms.find(r => r.id === id);
-    if (room) { const q = lastPoint(room); dest = { x: q[0], y: q[1], label: room.label.replace('\n', ' ') }; arrived = false; updateRoute(); }
+    if (room) { const q = lastPoint(room); dest = { x: q[0], y: q[1], label: room.label.replace('\n', ' ') }; updateRoute(); }
     else dest = null;
   };
 
   buildUI();
-
-  // إذا سحبتِ الخريطة بإصبع واحد يتوقف التتبع التلقائي (ويرجع بزر 🎯 أو بمسح QR جديد)
-  (function () {
-    const w = document.getElementById('mapWrapper');
-    const ptrs = new Map();
-    w.addEventListener('pointerdown', e => { ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
-    w.addEventListener('pointermove', e => {
-      const p = ptrs.get(e.pointerId);
-      if (!p || ptrs.size !== 1) return; // القرص بإصبعين = تكبير فقط، لا يوقف التتبع
-      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 6) stopFollow();
-    });
-    const up = e => ptrs.delete(e.pointerId);
-    w.addEventListener('pointerup', up);
-    w.addEventListener('pointercancel', up);
-    w.addEventListener('lostpointercapture', up);
-    w.addEventListener('wheel', e => { if (!e.ctrlKey) stopFollow(); }, { passive: true });
-  })();
 
   // محاكاة بالكيبورد للتجربة على الكمبيوتر: ↑ خطوة، ←/→ تدوير 15°
   addEventListener('keydown', e => {
@@ -626,7 +419,7 @@
     if (devHeading == null) gotHeading(offsetFor(posCtx.b));
     if (e.key === 'ArrowUp') { onStep(); e.preventDefault(); }
     else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      devHeading = (devHeading + (e.key === 'ArrowLeft' ? -15 : 15) + 360) % 360; render(); camKick(); e.preventDefault();
+      devHeading = (devHeading + (e.key === 'ArrowLeft' ? -15 : 15) + 360) % 360; render(); e.preventDefault();
     }
   });
 

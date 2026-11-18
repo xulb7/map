@@ -477,65 +477,6 @@ function renderFloorsMenu() {
   });
 }
 
-// أسماء القاعات (تُربط بالكود، مع تجاهل الأصفار الزائدة)
-const ROOM_NAMES_RAW = {
-  "B-S-04": "رئيسة قسم التقنية الإدارية",
-  "B-S-02": "معمل حاسب آلي",
-  "B-S-03": "مكتب أعضاء هيئة التدريب",
-  "B-S-11": "معمل حاسب آلي",
-  "B-S-01": "ورشة تدريبية",
-  "B-S-07": "دورة مياه",
-  "B-S-08": "دورة مياه",
-  "B-F-01": "النادي الطلابي",
-  "B-F-02": "معمل حاسب آلي",
-  "B-F-03": "مكتب أعضاء هيئة التدريب",
-  "B-F-04": "رئيسة قسم الدراسات العامة",
-  "B-F-15": "قاعة اجتماعات",
-  "B-F-16": "معمل حاسب آلي",
-  "B-F-11": "المكتبة",
-  "B-F-10": "ميني ماركت",
-  "B-F-13": "غرفة كهرباء",
-  "B-F-07": "دورة مياه",
-  "B-F-08": "دورة مياه",
-  "B-G-14": "وكيلة شؤون المتدربات",
-  "B-G-15": "وحدة القبول والتسجيل",
-  "B-G-10": "مستودع",
-  "B-G-11": "الصالة الرياضية",
-  "B-G-02": "وحدة التوجيه والإرشاد",
-  "B-G-01-2": "وحدة الصحة والسلامة",
-  "B-G-12": "معمل حاسب آلي",
-  "B-G-07": "دورة مياه",
-  "A-G-01": "معمل حاسب آلي",
-  "A-G-02": "معمل حاسب آلي",
-  "A-G-03": "معمل حاسب آلي",
-  "A-G-15": "وحدة التوجيه والإرشاد",
-  "A-G-05": "مخزن",
-  "A-G-07": "مديرة الشؤون المالية والإدارية",
-  "A-G-06": "نادي",
-  "A-G-09": "معمل حاسب آلي",
-  "A-F-05": "مكتب أعضاء هيئة التدريب",
-  "A-F-07": "رئيسة قسم الوسائط المتعددة + مكتب التصوير",
-  "A-F-09": "معمل حاسب آلي",
-  "A-F-16-3": "وكيلة التدريب",
-  "A-F-16": "الشؤون المالية والإدارية",
-  "A-F-06": "وكيلة الجودة",
-  "A-F-14": "غرفة الاجتماعات",
-  "A-F-13": "مكتب العميدة",
-  "A-F-12": "غرفة انتظار"
-};
-
-function normCode(c) {
-  return String(c).replace(/-0+(?=\d)/g, '-');
-}
-
-const ROOM_NAMES = {};
-Object.keys(ROOM_NAMES_RAW).forEach(k => { ROOM_NAMES[normCode(k)] = ROOM_NAMES_RAW[k]; });
-
-function roomDisplay(room) {
-  const name = ROOM_NAMES[normCode(room.id)];
-  return name ? `${room.id} (${name})` : room.label.replace('\n', ' ');
-}
-
 function renderBlueprint() {
   const svgCorridors = document.getElementById('corridorSvg');
   const roomsLayer = document.getElementById('roomsContainer');
@@ -551,7 +492,7 @@ function renderBlueprint() {
     const node = document.createElement('div');
     node.className = `room-node ${room.type || ''}`;
     node.id = `node-${room.id}`;
-    node.innerText = roomDisplay(room);
+    node.innerText = room.label;
 
     node.style.left = room.x + 'px';
     node.style.top = room.y + 'px';
@@ -567,7 +508,7 @@ function renderBlueprint() {
 
     const opt = document.createElement('option');
     opt.value = room.id;
-    opt.innerText = roomDisplay(room);
+    opt.innerText = room.label.replace('\n', ' ');
     dropdown.appendChild(opt);
   });
 
@@ -605,7 +546,7 @@ function highlightAndRoute() {
     marker.setAttribute('transform', `translate(${lastPoint[0]}, ${lastPoint[1]})`);
     marker.style.display = 'block';
 
-    document.getElementById('infoText').innerText = `المسار المباشر نحو ${roomDisplay(room)} (مبنى ${selectedBldg} - ${selectedFloor})`;
+    document.getElementById('infoText').innerText = `المسار المباشر نحو ${room.label.replace('\n', ' ')} (مبنى ${selectedBldg} - ${selectedFloor})`;
     banner.style.display = 'flex';
   }
 }
