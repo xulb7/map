@@ -1,13 +1,21 @@
 /* nav-mode.js — وضع التنقل (مثل خرائط Google)
    يعتمد على pdr-nav.js (الموقع/الاتجاه/الوجهة) ولا يغيّر الخريطة أو المسارات أو الباركود.
    الفكرة: "كاميرا" واحدة تتحكم بتحويل لوحة الخريطة (translate · rotate · scale)
-   وتتحرك بسلاسة (تنعيم أسّي) نحو الهدف في كل إطار، فلا قفزات ولا اهتزاز. */
+   وتتحرك بسلاسة (تنعيم أسّي) نحو الهدف في كل إطار، فلا قفزات ولا اهتزاز.
+
+   الإصدار 2:
+   - تنسيقات وضع التنقل تُحقن من هذا الملف (لم تكن موجودة في style.css).
+   - بدء تلقائي للتنقل بعد تحديد الموقع (QR) واختيار الوجهة.
+   - قناع (mask) ثابت على الشاشة: لا تظهر حواف الخريطة أبداً أثناء التنقل.
+   - تنبيه الوصول: بطاقة متحركة + حلقات + اهتزاز + صوت اختياري. */
 (function () {
   'use strict';
   if (!window.PDR) return;
 
   /* ---------- إعدادات الضبط ---------- */
   const NAV = window.NAV_CONFIG = Object.assign({
+    autoStart: true,    // يبدأ التنقل تلقائياً بعد تحديد الموقع (QR) واختيار الوجهة
+    sound: true,        // السماح بصوت تنبيه الوصول (يمكن كتمه من البطاقة)
     anchorY: 0.68,      // موضع المستخدم على الشاشة (من الأعلى) — أسفل المنتصف ليظهر الطريق أمامه
     deadOn: 6,          // لا تدور الخريطة قبل أن يتجاوز الفرق هذه الدرجات (يمنع الاهتزاز)
     deadOff: 1.5,       // تتوقف المتابعة عند الاقتراب من هذا الفرق
@@ -27,6 +35,124 @@
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   const board = $('blueprintBoard'), wrapper = $('mapWrapper');
 
+  /* ---------- التنسيقات (تُحقن هنا حتى لا نعدّل style.css) ---------- */
+  const css = document.createElement('style');
+  css.id = 'navModeStyles';
+  css.textContent = `
+@property --nmk { syntax: '<percentage>'; inherits: false; initial-value: 400%; }
+
+/* قناع ثابت على الشاشة: يُظهر محيط المستخدم والمسار فقط ويُخفي بقية الخريطة وحوافها */
+body.nav-active .map-wrapper {
+  --nmk: 100%;
+  transition: --nmk .9s ease;
+  -webkit-mask-image: radial-gradient(ellipse calc(var(--nmk) * .72) calc(var(--nmk) * .62) at 50% 68%, #000 52%, rgba(0,0,0,0) 100%);
+          mask-image: radial-gradient(ellipse calc(var(--nmk) * .72) calc(var(--nmk) * .62) at 50% 68%, #000 52%, rgba(0,0,0,0) 100%);
+  cursor: default;
+}
+body.nav-active.nav-exit .map-wrapper { --nmk: 400%; }
+
+/* لا حدود ولا خلفية للوحة أثناء التنقل */
+body.nav-active .blueprint-board {
+  background: transparent !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+/* القاعات: تُخفَّف، والوجهة تبقى واضحة. النص يُرسم بعنصر وهمي يُعاد تدويره ليبقى مستقيماً */
+body.nav-active .room-node { font-size: 0; opacity: .5; transition: none; }
+body.nav-active .room-node.selected { opacity: 1; }
+body.nav-active .room-node::after {
+  content: attr(data-label);
+  display: block;
+  font-size: 11px;
+  font-weight: bold;
+  color: #fff;
+  white-space: pre-line;
+  text-align: center;
+  transform: rotate(var(--ctr, 0deg));
+}
+
+/* المسار: أوضح مع حركة خفيفة باتجاه المشي */
+body.nav-active #routePath { stroke-width: 7; animation: navFlow 1.2s linear infinite; }
+@keyframes navFlow { to { stroke-dashoffset: -16; } }
+
+/* المؤشر القديم يُخفى أثناء التنقل ويحل محله مؤشر وضع التنقل */
+body.nav-active #pdrMarker { display: none; }
+
+/* مؤشر المستخدم (ثابت على الشاشة) */
+.nav-marker {
+  position: fixed; left: 0; top: 0; width: 120px; height: 120px;
+  margin: -60px 0 0 -60px; z-index: 105; pointer-events: none;
+  display: none; will-change: transform;
+}
+body.nav-active .nav-marker { display: block; }
+.nav-marker .nm-ring {
+  fill: rgba(37,99,235,.22); stroke: rgba(96,165,250,.6); stroke-width: 1.5;
+  transform-box: fill-box; transform-origin: center;
+  animation: nmPulse 2s ease-out infinite;
+}
+@keyframes nmPulse { 0% { transform: scale(.7); opacity: .9; } 100% { transform: scale(1.7); opacity: 0; } }
+
+/* زر بدء/إنهاء التنقل */
+.nav-start-btn {
+  position: fixed; left: 50%; bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+  transform: translate(-50%, 16px); z-index: 112;
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 22px; border: none; border-radius: 999px;
+  background: var(--primary-blue, #2563eb); color: #fff;
+  font-size: 14px; font-weight: 800; cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0,0,0,.5);
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s, transform .25s, background .2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-start-btn.show { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.nav-start-btn.stop { background: #ef4444; }
+@media (max-width: 700px) { .nav-start-btn { bottom: calc(104px + env(safe-area-inset-bottom, 0px)); } }
+
+/* تنبيه الوصول */
+.nav-arrive {
+  position: fixed; inset: 0; z-index: 350;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(2,6,23,.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none; transition: opacity .25s;
+}
+.nav-arrive.show { opacity: 1; pointer-events: auto; }
+.nav-arrive-card {
+  position: relative; width: min(88vw, 340px); text-align: center;
+  background: #0f172a; border: 1px solid var(--primary-green, #10b981);
+  border-radius: 18px; padding: 26px 22px 20px;
+  box-shadow: 0 0 40px rgba(16,185,129,.35), 0 20px 50px rgba(0,0,0,.6);
+  transform: scale(.85); transition: transform .35s cubic-bezier(.2,1.4,.4,1);
+}
+.nav-arrive.show .nav-arrive-card { transform: scale(1); }
+.nav-arrive-card h3 { font-size: 17px; margin: 14px 0 6px; color: #fff; }
+.nav-arrive-card p { font-size: 13px; color: var(--text-sub, #94a3b8); margin-bottom: 16px; line-height: 1.6; }
+.na-icon { position: relative; width: 72px; height: 72px; margin: 0 auto; }
+.na-icon svg { position: relative; width: 72px; height: 72px; }
+.na-icon::before, .na-icon::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid var(--primary-green, #10b981); opacity: 0;
+}
+.nav-arrive.show .na-icon::before { animation: naRipple 1.8s ease-out infinite; }
+.nav-arrive.show .na-icon::after  { animation: naRipple 1.8s ease-out .6s infinite; }
+@keyframes naRipple { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(2.2); opacity: 0; } }
+.na-circle { stroke-dasharray: 151; stroke-dashoffset: 151; }
+.na-check  { stroke-dasharray: 40;  stroke-dashoffset: 40; }
+.nav-arrive.show .na-circle { animation: naDraw .6s ease forwards; }
+.nav-arrive.show .na-check  { animation: naDraw .4s ease .45s forwards; }
+@keyframes naDraw { to { stroke-dashoffset: 0; } }
+.nav-snd {
+  position: absolute; top: 10px; left: 10px; width: 32px; height: 32px;
+  border-radius: 50%; border: 1px solid var(--border-color, #334155);
+  background: #1e293b; color: #fff; font-size: 14px; cursor: pointer; padding: 0;
+}
+`;
+  document.head.appendChild(css);
+
   /* ---------- الحالة ---------- */
   let mode = 'off';                    // off | nav | exit
   let raf = 0, last = 0, enteredAt = 0, exitAt = 0;
@@ -34,6 +160,7 @@
   let hf = 0;                          // الاتجاه بعد التنعيم
   let routeDir = null, routeTimer = 0;
   let fit = { s: 1, x: 0, y: 0 }, exitC = { x: 0, y: 0 };
+  let autoPos = null, autoDest = null, btnKey = '';
   const cam = { ax: 0, ay: 0, cx: 0, cy: 0, th: 0, s: 1 };
   const tgt = { ax: 0, ay: 0, cx: 0, cy: 0, th: 0, s: 1 };
 
@@ -42,6 +169,35 @@
     t.className = 'pdr-toast'; t.textContent = msg;
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 3500);
+  }
+
+  /* ---------- الصوت (اختياري) ---------- */
+  let actx = null, soundOn = true;
+  try { soundOn = localStorage.getItem('nav_sound') !== '0'; } catch (e) { /* سفاري الخاص */ }
+  function unlockAudio() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!actx) actx = new AC();
+      if (actx.state === 'suspended') actx.resume();
+    } catch (e) { /* غير مدعوم */ }
+  }
+  // المتصفحات تسمح بالصوت فقط بعد تفاعل المستخدم، لذا نفتحه عند أول لمسة
+  ['pointerdown', 'touchend', 'keydown'].forEach(ev => addEventListener(ev, unlockAudio, { passive: true }));
+  function chime() {
+    if (!NAV.sound || !soundOn || !actx) return;
+    try {
+      const now = actx.currentTime;
+      [[659.25, 0], [783.99, 0.16], [1046.5, 0.32]].forEach(([f, t]) => {
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, now + t);
+        g.gain.exponentialRampToValueAtTime(0.25, now + t + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.5);
+        o.connect(g); g.connect(actx.destination);
+        o.start(now + t); o.stop(now + t + 0.55);
+      });
+    } catch (e) { /* تجاهل */ }
   }
 
   /* ---------- واجهة: الزر الجانبي + مؤشر المستخدم + بطاقة الوصول ---------- */
@@ -66,6 +222,7 @@
   arrive.className = 'nav-arrive';
   arrive.innerHTML =
     '<div class="nav-arrive-card" role="alertdialog" aria-live="assertive">' +
+    '<button type="button" class="nav-snd" id="naSnd" title="الصوت" aria-label="الصوت"></button>' +
     '<div class="na-icon"><svg viewBox="0 0 52 52">' +
     '<circle class="na-circle" cx="26" cy="26" r="24" fill="rgba(16,185,129,.18)" stroke="#10b981" stroke-width="3"/>' +
     '<path class="na-check" d="M14 27 l8 8 l16 -17" fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>' +
@@ -76,11 +233,21 @@
   document.body.appendChild(arrive);
   $('naOk').onclick = () => { hideArrive(); if (mode === 'nav') stop(); };
 
+  const sndBtn = $('naSnd');
+  function refreshSnd() { sndBtn.textContent = soundOn ? '🔊' : '🔇'; sndBtn.style.display = NAV.sound ? '' : 'none'; }
+  sndBtn.onclick = () => {
+    soundOn = !soundOn;
+    try { localStorage.setItem('nav_sound', soundOn ? '1' : '0'); } catch (e) { /* تجاهل */ }
+    refreshSnd(); if (soundOn) chime();
+  };
+  refreshSnd();
+
   function showArrive() {
     const d = PDR.state().dest;
     $('naPlace').textContent = (d ? d.label + ' — ' : '') + 'لقد وصلت إلى وجهتك';
     arrive.classList.remove('show'); void arrive.offsetWidth; // لإعادة تشغيل الحركة
     arrive.classList.add('show');
+    chime();
     try { if (navigator.vibrate) navigator.vibrate([180, 90, 180]); } catch (e) { /* غير مدعوم */ }
   }
   function hideArrive() { arrive.classList.remove('show'); }
@@ -155,14 +322,23 @@
   }
 
   /* ---------- تشغيل / إيقاف ---------- */
-  function start() {
+  const needsSensorPermission = () =>
+    (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') ||
+    (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function');
+
+  function start(auto) {
     const st = PDR.state();
     if (!st.pos || !PDR.matches()) { toast('امسح QR (📷) لتحديد موقعك على هذا الدور أولاً'); return; }
     if (!st.dest) { toast('اختر القاعة التي تريد الذهاب إليها أولاً'); return; }
-    // يجب أن يُطلب إذن الحركة/الاتجاه مباشرة من ضغطة الزر
-    if (!PDR.isTracking()) PDR.toggleTracking();
+    unlockAudio();
+    if (!PDR.isTracking()) {
+      // آيفون يشترط ضغطة مباشرة لطلب إذن الحركة/الاتجاه؛ البدء التلقائي ليس ضغطة
+      if (auto && needsSensorPermission()) toast('اضغط 📍 لتفعيل الاتجاه ليتبع الخريطة حركتك');
+      else PDR.toggleTracking();
+    }
 
     hideArrive(); arrived = false; inSince = 0; zoomMul = 1; following = true;
+    autoPos = st.posCtx; autoDest = st.dest;
     if (mode === 'off') {
       // نبدأ من العرض الحالي نفسه ثم تنزلق الكاميرا إلى وضع التنقل
       cam.s = scale; cam.th = 0;
@@ -172,6 +348,7 @@
     mode = 'nav'; enteredAt = performance.now(); last = 0;
     routeDir = PDR.routeDirection();
     hf = st.devHeading == null ? (routeDir != null ? routeDir : 0) : PDR.heading();
+    document.body.classList.remove('nav-exit');
     document.body.classList.add('nav-active');
     board.querySelectorAll('.room-node').forEach(n => n.setAttribute('data-label', n.textContent));
     clearInterval(routeTimer);
@@ -185,6 +362,7 @@
     hideArrive();
     clearInterval(routeTimer);
     mode = 'exit'; exitAt = performance.now();
+    document.body.classList.add('nav-exit');   // يوسّع القناع تدريجياً أثناء العودة للعرض الكامل
     fitToScreen();                       // يحسب العرض الكامل (المحجوب أثناء التنقل)
     fit = { s: scale, x: pointX, y: pointY };
     exitC = { x: cam.cx, y: cam.cy };
@@ -197,7 +375,7 @@
     cancelAnimationFrame(raf); raf = 0; last = 0;
     clearInterval(routeTimer);
     hideArrive();
-    document.body.classList.remove('nav-active');
+    document.body.classList.remove('nav-active', 'nav-exit');
     board.style.removeProperty('--ctr');
     board.querySelectorAll('.room-node').forEach(n => n.removeAttribute('data-label'));
     fitToScreen();
@@ -207,14 +385,27 @@
   function refreshBtn() {
     const st = PDR.state();
     const ready = mode === 'nav' || (mode === 'off' && st.pos && PDR.matches());
+    const key = (ready ? 1 : 0) + '|' + mode;
+    if (key === btnKey) return;          // لا نعيد بناء الزر إلا عند تغيّر الحالة (يمنع ضياع الضغطة)
+    btnKey = key;
     btn.classList.toggle('show', !!ready);
     btn.classList.toggle('stop', mode === 'nav');
     btn.innerHTML = mode === 'nav'
       ? '<i class="fas fa-xmark"></i><span>إنهاء التنقل</span>'
       : '<i class="fas fa-location-arrow"></i><span>ابدأ التنقل</span>';
   }
-  btn.onclick = () => { if (mode === 'nav') stop(); else start(); };
-  setInterval(refreshBtn, 400);
+  btn.onclick = () => { if (mode === 'nav') stop(); else start(false); };
+
+  // بدء تلقائي: بعد تحديد الموقع بـ QR واختيار الوجهة (مرة واحدة لكل موقع/وجهة جديدة)
+  function tick() {
+    refreshBtn();
+    const st = PDR.state();
+    if (mode !== 'off') { autoPos = st.posCtx; autoDest = st.dest; return; }
+    if (!NAV.autoStart || !st.pos || !PDR.matches() || !st.dest) return;
+    if (st.posCtx === autoPos && st.dest === autoDest) return;
+    start(true);
+  }
+  setInterval(tick, 300);
 
   /* ---------- ربط بدون تعديل الكود الأصلي ---------- */
   // أثناء التنقل الكاميرا وحدها تتحكم بتحويل الخريطة
