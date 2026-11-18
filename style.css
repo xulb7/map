@@ -193,6 +193,29 @@ body, html {
   transition: background 0.2s, border-color 0.2s;
 }
 
+.room-node {
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 2px;
+  overflow: hidden;
+  line-height: 1.15;
+}
+
+.room-code {
+  display: block;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.room-name {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.9;
+  max-width: 100%;
+  word-wrap: break-word;
+}
+
 .room-node:hover {
   border-color: var(--primary-green);
   background: #334155;
