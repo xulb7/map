@@ -495,7 +495,8 @@ const ROOM_NAMES_RAW = {
   "B-F-13": "غرفة كهرباء",
   "B-G-14": "وكيلة شؤون المتدربات",
   "B-G-15": "وحدة القبول والتسجيل",
-  "B-G-11": "مستودع تقنية المعلومات",
+  "B-G-10": "مستودع تقنية المعلومات",
+  "B-G-11": "الصالة الرياضية",
   "B-G-02": "وحدة التوجيه والإرشاد",
   "B-G-01-2": "وحدة الصحة والسلامة",
   "B-G-12": "معمل حاسب آلي",
@@ -530,41 +531,6 @@ function roomDisplay(room) {
   return name ? `${room.id} (${name})` : room.label.replace('\n', ' ');
 }
 
-function normText(t) {
-  return normCode(String(t).toLowerCase().trim())
-    .replace(/[\u064B-\u0652\u0640]/g, '')
-    .replace(/[أإآ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/ى/g, 'ي');
-}
-
-function filterRooms() {
-  const input = document.getElementById('roomSearch');
-  const dropdown = document.getElementById('roomDropdown');
-  if (!input || !dropdown) return;
-  const q = normText(input.value);
-  const current = dropdown.value;
-  dropdown.innerHTML = '<option value="">اختر القاعة...</option>';
-  campusData[selectedBldg][selectedFloor].rooms.forEach(room => {
-    const text = roomDisplay(room);
-    if (!q || normText(text).includes(q)) {
-      const opt = document.createElement('option');
-      opt.value = room.id;
-      opt.innerText = text;
-      dropdown.appendChild(opt);
-    }
-  });
-  if (Array.from(dropdown.options).some(o => o.value === current)) dropdown.value = current;
-}
-
-function searchEnter() {
-  const dropdown = document.getElementById('roomDropdown');
-  if (dropdown && dropdown.options.length > 1) {
-    dropdown.selectedIndex = 1;
-    highlightAndRoute();
-  }
-}
-
 function renderBlueprint() {
   const svgCorridors = document.getElementById('corridorSvg');
   const roomsLayer = document.getElementById('roomsContainer');
@@ -588,8 +554,6 @@ function renderBlueprint() {
     node.style.height = room.h + 'px';
 
     node.onclick = () => {
-      const s = document.getElementById('roomSearch');
-      if (s && s.value) { s.value = ''; filterRooms(); }
       dropdown.value = room.id;
       highlightAndRoute();
     };
@@ -601,9 +565,6 @@ function renderBlueprint() {
     opt.innerText = roomDisplay(room);
     dropdown.appendChild(opt);
   });
-
-  const rs = document.getElementById('roomSearch');
-  if (rs) rs.value = '';
 
   fitToScreen();
 }
