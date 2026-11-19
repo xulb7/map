@@ -16,6 +16,8 @@
     stepWarmup: 3,        // عدد الخطوات المتتالية المنتظمة اللازمة قبل اعتبارها مشياً حقيقياً (يمنع حركة اليد العشوائية)
     stepMaxGapMs: 1500,   // أكبر زمن بين خطوتين قبل اعتبار المشي متوقفاً
     stepMaxAcc: 12,       // أي هزّة أقوى من هذا (م/ث²) تُعتبر رجّة وليست خطوة
+    stepMaxThr: 3.5,      // سقف عتبة كشف الخطوة (م/ث²): يمنع رجّة قوية واحدة (مثل الضغط على الشاشة) من رفع العتبة فوق قوة المشي الطبيعي
+    stepAmpRatio: 3,      // أقصى نسبة بين قوة قمتين متتاليتين قبل اعتبارها حركة عشوائية أو رجّة
     maxRotRate: 320,      // دوران أسرع من هذا (°/ث) = تدوير الجوال باليد، لا تُحسب خطوات أثناءه
     adaptiveStride: true, // طول الخطوة يتكيف مع سرعة المشي
     refCadence: 1.8,      // الإيقاع المرجعي (خطوة/ث) الذي ينطبق عليه strideM
@@ -397,7 +399,13 @@
     // أقل زمن بين خطوتين يتكيف مع الإيقاع الحالي (يمنع احتساب ارتداد الخطوة كخطوة ثانية)
     const minInt = walking && avgInt ? Math.max(CFG.stepMinMs, avgInt * 0.6) : CFG.stepMinMs;
     if (gap < minInt) return;
+    // رجّة مفاجئة أقوى بكثير من قوة المشي الحالية (ضغطة شاشة/ارتطام) → تُتجاهل ولا تُحسب خطوة
+    if (walking && ampAvg && amp > ampAvg * CFG.stepAmpRatio) return;
     lastPeakT = t;
+    // قبل تأكيد المشي: قوة القمة يجب أن تتناسب مع سابقتها، وإلا نبدأ العدّ من جديد (حركة عشوائية)
+    if (!walking && ampAvg && (amp > ampAvg * CFG.stepAmpRatio || amp * CFG.stepAmpRatio < ampAvg)) {
+      ampAvg = amp; streak = 1; prevInt = 0; return;
+    }
     ampAvg = ampAvg ? ampAvg * 0.8 + amp * 0.2 : amp;
     if (walking) {
       avgInt = avgInt * 0.7 + gap * 0.3;
@@ -431,7 +439,9 @@
     sv = sv * 0.5 + v * 0.5;
     const d = sv;
     // d1 = القيمة السابقة: قمة محلية فوق العتبة (تتكيف مع قوة المشي)
-    const thr = Math.max(CFG.stepThresh, ampAvg * 0.5);
+    // العتبة تعود للحد الأدنى بعد أي توقف (لا تبقى عالية بسبب رجّة قديمة)، ولها سقف
+    const fresh = !lastPeakT || t - lastPeakT > CFG.stepMaxGapMs;
+    const thr = fresh ? CFG.stepThresh : Math.min(CFG.stepMaxThr, Math.max(CFG.stepThresh, ampAvg * 0.5));
     if (d1 > thr && d1 >= d2 && d1 > d) {
       if (d1 <= CFG.stepMaxAcc && t1 >= rotBlockUntil) onPeak(t1, d1);
     }
