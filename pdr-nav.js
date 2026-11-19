@@ -11,10 +11,15 @@
     minAlign: 0.35,       // أقل توافق بين اتجاه المشي واتجاه الممر
     stepMinMs: 320,       // أقل زمن بين خطوتين
     stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
+    stepMaxPeak: 14,      // أي هزة أقوى من كذا تعتبر نفضة جوال مو خطوة
+    maxRot: 160,          // لو الجوال يدور أسرع من كذا (°/ث) يعتبر تحريك جوال مو مشي
+    walkTimeout: 1400,    // بعد هذا الوقت بدون خطوات يعتبر وقفت (لازم خطوتين متتاليتين ليبدأ المشي)
+    arrowTc: 220,         // بطء دوران الكاشف الأزرق قبل المعايرة (م.ث، أكبر = أبطأ)
+    arrowTcLocked: 450,   // بطء دوران الكاشف بعد المعايرة
+    arrowDead: 6,         // بعد المعايرة: تغيير أقل من كذا (درجة) يتجاهل
+    arrowSnap: 40,        // بعد المعايرة: الكاشف يلتصق باتجاه الممر إذا قريب منه (درجة)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
-    gyroSmooth: 0.8,      // سرعة استجابة الجايرو (1 = فوري، أقل = أنعم وأبطأ)
-    adaptStride: true,    // طول الخطوة يتبع سرعة المشي (أسرع = خطوة أطول قليلاً)
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -25,7 +30,8 @@
   const gyroOff = {};      // بعد المعايرة: فرق الجايرو عن اتجاه الخريطة لكل مبنى (في الذاكرة فقط، لا يُحفظ)
   let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;
   let markerEl, arrowEl, stepsEl, trackBtn;
-  let disp = null, animRaf = 0, animT = 0; // موضع العرض (حركة ناعمة نحو pos)
+  let disp = null, hDisp = null, hTarget = 0, hDead = null, animRaf = 0, animT = 0; // عرض ناعم للنقطة والكاشف
+  let seq = 0, lastDt = 0, cad = 0, rotT = -1e9; // إيقاع المشي
 
   /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */
   const store = {
@@ -47,7 +53,8 @@
     if (devHeading != null) setOffset(b, devHeading - h);          // احتياط إذا الجايرو غير متوفر
     if (relHeading != null) gyroOff[b] = (((relHeading - h) % 360) + 360) % 360;
   }
-  function resetGyro() { relHeading = null; for (const k in gyroOff) delete gyroOff[k]; }
+  function resetGyro() { relHeading = null; hDead = null; for (const k in gyroOff) delete gyroOff[k]; }
+  const isLocked = b => relHeading != null && gyroOff[b] != null;
   // اتجاه الجهاز الأمامي من alpha/beta/gamma (يعمل سواء الجوال مسطّح أو شبه عمودي)
   function gyroHeading(alpha, beta, gamma) {
     const r = Math.PI / 180, ca = Math.cos(alpha * r), sa = Math.sin(alpha * r);
@@ -149,23 +156,17 @@
   function move(stride, g, b) {
     const th = mapHeadingFor(b) * Math.PI / 180, h = { x: Math.sin(th), y: -Math.cos(th) };
     let best = null;
-    const locked = relHeading != null && gyroOff[b] != null;
-    // بعد التثبيت: لو ما لقينا ممر موافق نعيد بمحاذاة أوسع حتى ما تضيع خطوات المشي
-    for (const ma of locked ? [CFG.minAlign, CFG.minAlign * 0.5] : [CFG.minAlign]) {
-      for (const e of g.edges) {
-        const q = proj(pos, e.a, e.b);
-        if (q.d > CFG.snapR) continue;
-        const ux = (e.b.x - e.a.x) / e.w, uy = (e.b.y - e.a.y) / e.w;
-        for (const sg of [1, -1]) {
-          if (sg * (ux * h.x + uy * h.y) < ma) continue;
-          const c = proj({ x: q.pt.x + sg * ux * stride, y: q.pt.y + sg * uy * stride }, e.a, e.b);
-          if (dist(c.pt, pos) > stride * 1.5) continue; // لا نقفز أكثر من خطوة واحدة
-          const gain = (c.pt.x - pos.x) * h.x + (c.pt.y - pos.y) * h.y;
-          if (!best || gain > best.gain) best = { gain, pt: c.pt };
-        }
+    for (const e of g.edges) {
+      const q = proj(pos, e.a, e.b);
+      if (q.d > CFG.snapR) continue;
+      const ux = (e.b.x - e.a.x) / e.w, uy = (e.b.y - e.a.y) / e.w;
+      for (const sg of [1, -1]) {
+        if (sg * (ux * h.x + uy * h.y) < CFG.minAlign) continue;
+        const c = proj({ x: q.pt.x + sg * ux * stride, y: q.pt.y + sg * uy * stride }, e.a, e.b);
+        if (dist(c.pt, pos) > stride * 1.5) continue; // لا نقفز أكثر من خطوة واحدة
+        const gain = (c.pt.x - pos.x) * h.x + (c.pt.y - pos.y) * h.y;
+        if (!best || gain > best.gain) best = { gain, pt: c.pt };
       }
-      if (best && best.gain >= stride * 0.15) break;
-      best = null;
     }
     if (!best || best.gain < stride * 0.15) return false; // جدار أو نهاية ممر
     pos = best.pt;
@@ -182,9 +183,8 @@
     if (devHeading == null && relHeading == null) { hint('بانتظار قراءة البوصلة… حرّك الجوال حركة رقم 8'); return; }
     steps++;
     // التتبع يستمر على دور/مبنى المستخدم حتى لو كان يتصفح خريطة غيره
-    // سرعة المشي: خطوات أسرع (فاصل أقصر) → خطوة أطول قليلاً، وأبطأ → أقصر (حدود 0.85–1.25)
-    let k = 1;
-    if (CFG.adaptStride && dt > 0 && dt < 1500) k = Math.max(0.85, Math.min(1.25, 1 + (500 - dt) / 1000));
+    // الخطوة تتبع إيقاع مشيك: أسرع → أطول شوي، أبطأ → أقصر (حدود 0.8–1.25)
+    const k = dt > 0 ? Math.max(0.8, Math.min(1.25, 1 + (520 - dt) / 1000)) : 1;
     const moved = move(CFG.strideM * CFG.pxPerM * k, graphFor(posCtx.b, posCtx.f), posCtx.b);
     if (matchesFloor()) {
       if (moved) updateRoute();
@@ -230,21 +230,39 @@
     if (!markerEl) return;
     if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }
     markerEl.setAttribute('display', 'block');
-    if (!disp || dist(disp, pos) > CFG.strideM * CFG.pxPerM * 4) disp = { x: pos.x, y: pos.y }; // قفزة (QR/تغيير موقع) → فوري
-    markerEl.setAttribute('transform', 'translate(' + disp.x + ',' + disp.y + ')');
-    arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
-    if (!animRaf && dist(disp, pos) > 0.3) { animT = performance.now(); animRaf = requestAnimationFrame(animate); }
+    if (!disp || dist(disp, pos) > CFG.strideM * CFG.pxPerM * 4) disp = { x: pos.x, y: pos.y }; // قفزة (QR) → فوري
+    hTarget = arrowTarget();
+    if (hDisp == null) hDisp = hTarget;
+    paint();
+    if (!animRaf) { animT = performance.now(); animRaf = requestAnimationFrame(animate); }
   }
-  // حركة ناعمة سريعة: النقطة تلحق موضع الخطوة خلال ~0.15 ث فتتبع سرعة المشي بدون تأخير
+  // اتجاه الكاشف الأزرق: قبل المعايرة يتبع البوصلة، وبعدها يلتصق باتجاه الممر ويتجاهل الاهتزازات الصغيرة
+  function arrowTarget() {
+    let h = mapHeading();
+    if (!isLocked(selectedBldg)) { hDead = null; return h; }
+    const s = snap(pos, cur());
+    if (s && s.d <= CFG.snapR) {
+      const e = s.e, a = (Math.atan2(e.b.x - e.a.x, -(e.b.y - e.a.y)) * 180 / Math.PI + 360) % 360;
+      for (const c of [a, (a + 180) % 360]) if (Math.abs(angDiff(h, c)) < CFG.arrowSnap) { h = c; break; }
+    }
+    if (hDead != null && Math.abs(angDiff(h, hDead)) < CFG.arrowDead) return hDead;
+    hDead = h; return h;
+  }
+  function paint() {
+    markerEl.setAttribute('transform', 'translate(' + disp.x + ',' + disp.y + ')');
+    arrowEl.setAttribute('transform', 'rotate(' + hDisp + ')');
+  }
+  // النقطة تلحق موضع الخطوة بنعومة، والكاشف يدور بهدوء (أبطأ قبل المعايرة، وأهدأ بعدها)
   function animate(now) {
     animRaf = 0;
     if (!pos || !disp || !matchesFloor()) return;
     const dt = Math.min(64, now - animT); animT = now;
     const a = 1 - Math.exp(-dt / 60);
     disp.x += (pos.x - disp.x) * a; disp.y += (pos.y - disp.y) * a;
-    if (dist(disp, pos) < 0.3) disp = { x: pos.x, y: pos.y };
-    markerEl.setAttribute('transform', 'translate(' + disp.x + ',' + disp.y + ')');
-    if (dist(disp, pos) > 0.3) animRaf = requestAnimationFrame(animate);
+    const tc = isLocked(selectedBldg) ? CFG.arrowTcLocked : CFG.arrowTc;
+    hDisp = (hDisp + angDiff(hTarget, hDisp) * (1 - Math.exp(-dt / tc)) + 360) % 360;
+    paint();
+    if (dist(disp, pos) > 0.3 || Math.abs(angDiff(hTarget, hDisp)) > 0.5) animRaf = requestAnimationFrame(animate);
   }
 
   function setPos(x, y, b, f) {
@@ -358,18 +376,32 @@
   function onMotion(e) {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x == null) return;
+    const t = performance.now(), rr = e.rotationRate;
+    if (rr && Math.hypot(rr.alpha || 0, rr.beta || 0, rr.gamma || 0) > CFG.maxRot) rotT = t; // جوال يتحرك بسرعة
     const m = Math.hypot(a.x, a.y, a.z);
     avg = avg * 0.9 + m * 0.1;
-    const d = m - avg, t = performance.now();
-    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { const dt = t - lastStepT; lastStepT = t; onStep(dt); }
+    const d = m - avg;
+    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) stepCandidate(t, d1);
     d2 = d1; d1 = d;
+  }
+  // الخطوة تنحسب فقط إذا طلعت بإيقاع مشي منتظم (خطوتين متتاليتين)، وتتجاهل نفض/تدوير الجوال
+  function stepCandidate(t, peak) {
+    if (peak > CFG.stepMaxPeak || t - rotT < 350) return;
+    const dt = t - lastStepT;
+    lastStepT = t;
+    if (dt > CFG.walkTimeout) { seq = 1; lastDt = 0; cad = 0; return; }       // بداية مشي جديد
+    if (lastDt && Math.abs(dt - lastDt) > lastDt * 0.65) { seq = 1; lastDt = 0; return; } // إيقاع غير منتظم
+    lastDt = dt; cad = cad ? cad * 0.6 + dt * 0.4 : dt;
+    seq++;
+    if (seq === 2) onStep(cad); // الخطوة الأولى المعلّقة
+    onStep(cad);
   }
   function onOri(e) {
     const isAbs = e.type === 'deviceorientationabsolute' || e.absolute === true;
     // (أ) الجايرو: قراءة نسبية غير مغناطيسية → للتثبيت بعد المعايرة
     if (!isAbs && e.alpha != null && e.beta != null && e.gamma != null) {
       const g = gyroHeading(e.alpha, e.beta, e.gamma);
-      if (g != null) relHeading = relHeading == null ? g : (relHeading + angDiff(g, relHeading) * CFG.gyroSmooth + 360) % 360;
+      if (g != null) relHeading = relHeading == null ? g : (relHeading + angDiff(g, relHeading) * 0.35 + 360) % 360;
     }
     // (ب) البوصلة: كما كانت (تُستخدم قبل المعايرة أو إذا الجايرو غير متوفر)
     let h = null;
