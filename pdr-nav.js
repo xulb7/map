@@ -1,56 +1,468 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>تحميل pdr-nav.js</title>
-<style>
-:root{--bg:#f8fafc;--card:#fff;--text:#0f172a;--sub:#64748b;--border:#e2e8f0;--green:#10b981;--green-d:#059669;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f172a;--card:#1e293b;--text:#f1f5f9;--sub:#94a3b8;--border:#334155;color-scheme:dark}}
-:root[data-theme="dark"]{--bg:#0f172a;--card:#1e293b;--text:#f1f5f9;--sub:#94a3b8;--border:#334155;color-scheme:dark}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif;min-height:100vh;display:flex;justify-content:center;padding:20px 14px}
-.card{width:100%;max-width:560px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px}
-h1{font-size:20px;margin:0 0 6px}
-p{color:var(--sub);font-size:14px;line-height:1.7;margin:6px 0}
-.btn{display:block;width:100%;margin-top:14px;padding:14px;border:0;border-radius:12px;background:var(--green);color:#fff;font-size:17px;font-weight:700;cursor:pointer}
-.btn:active{background:var(--green-d)}
-.btn.alt{background:transparent;color:var(--text);border:1px solid var(--border);font-size:15px;font-weight:600}
-#msg{min-height:22px;margin-top:12px;font-size:14px;text-align:center}
-.note{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-top:14px}
-textarea{width:100%;height:160px;margin-top:10px;direction:ltr;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px;display:none}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>pdr-nav.js — النسخة المعدّلة</h1>
-  <p>الملف الكامل بعد التعديل. اضغطي الزر وأكدي الحفظ.</p>
-  <button class="btn" id="dl">⬇️ تحميل الملف</button>
-  <button class="btn alt" id="cp">📋 نسخ الكود كامل</button>
-  <div id="msg"></div>
-  <div class="note"><p>⚠️ التحميل يحفظ الملف باسم <b dir="ltr">pdr-nav.txt</b> (النظام ما يسمح بحفظ .js مباشرة). بعد التحميل <b>غيّري الاسم إلى</b> <b dir="ltr">pdr-nav.js</b> وارفعيه مكان القديم.</p></div>
-  <textarea id="ta" readonly></textarea>
-</div>
-<script>
-const CODE = "/* pdr-nav.js — إضافة PDR + QR + تثبيت الموقع على الممرات (Map Matching)\n   تُضاف قبل <\/body> وبعد السكربت الأساسي:  <script src=\"pdr-nav.js\"><\/script>\n   لا تعدّل بيانات الخريطة؛ تغلّف الدوال الحالية فقط. */\n(function () {\n  'use strict';\n  const NS = 'http://www.w3.org/2000/svg';\n  const CFG = window.PDR_CONFIG = Object.assign({\n    pxPerM: 14,           // بكسل لكل متر (تقدير من أبعاد القاعات والممرات — يُضبط بالقياس الفعلي)\n    strideM: 0.7,         // طول الخطوة بالمتر\n    snapR: 12,            // نصف قطر البحث عن الممر\n    minAlign: 0.35,       // أقل توافق بين اتجاه المشي واتجاه الممر\n    stepMinMs: 320,       // أقل زمن بين خطوتين\n    stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)\n    stepMaxPeak: 14,      // أي هزة أقوى من كذا تعتبر نفضة جوال مو خطوة\n    maxRot: 160,          // لو الجوال يدور أسرع من كذا (°/ث) يعتبر تحريك جوال مو مشي\n    walkTimeout: 1400,    // بعد هذا الوقت بدون خطوات يعتبر وقفت (لازم خطوتين متتاليتين ليبدأ المشي)\n    arrowTc: 220,         // بطء دوران الكاشف الأزرق قبل المعايرة (م.ث، أكبر = أبطأ)\n    arrowTcLocked: 450,   // بطء دوران الكاشف بعد المعايرة\n    holdDeg: 50,          // بعد المعايرة: لفّة جوال أقل من كذا (درجة) تتجاهل — المشي يكمل على نفس اتجاه الممر\n    joinTol: 14,          // مسافة ربط الخطوط ببعض\n    arriveR: 18,          // مسافة الوصول (بكسل)\n    buildingNorth: { A: 0, B: 0 } // اتجاه \"أعلى الخريطة\" بالنسبة للشمال (درجات) لكل مبنى\n  }, window.PDR_CONFIG || {});\n  const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };\n\n  let pos = null, posCtx = null, dest = null;\n  let tracking = false, devHeading = null, pendingH = null, steps = 0;\n  let relHeading = null;   // اتجاه الجايرو (لا يتأثر بالمغناطيس) — مرجعه عشوائي لكنه ثابت أثناء التتبع\n  const gyroOff = {};      // بعد المعايرة: فرق الجايرو عن اتجاه الخريطة لكل مبنى (في الذاكرة فقط، لا يُحفظ)\n  let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;\n  let markerEl, arrowEl, stepsEl, trackBtn;\n  let disp = null, hDisp = null, hTarget = 0, hDead = null, animRaf = 0, animT = 0; // عرض ناعم للنقطة والكاشف\n  let travel = null, travelB = null; // اتجاه السير الثابت على الممر بعد المعايرة (يتغير فقط لما تمشي فعلياً باتجاه جديد)\n  let seq = 0, lastDt = 0, cad = 0, rotT = -1e9; // إيقاع المشي\n\n  /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */\n  const store = {\n    get() { try { return JSON.parse(localStorage.getItem('pdr_offsets') || '{}') || {}; } catch (e) { return {}; } },\n    set(o) { try { localStorage.setItem('pdr_offsets', JSON.stringify(o)); } catch (e) { /* سفاري الخاص */ } }\n  };\n  const offsets = store.get();\n  const setOffset = (b, v) => { offsets[b] = ((v % 360) + 360) % 360; store.set(offsets); };\n\n  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);\n  const angDiff = (a, b) => ((a - b + 540) % 360) - 180;\n  const offsetFor = b => offsets[b] != null ? offsets[b] : (CFG.buildingNorth[b] || 0);\n  // بعد المعايرة: الاتجاه يعتمد على الجايرو فقط (مثبّت)، وقبلها يعتمد على البوصلة كما كان\n  const mapHeadingFor = b => (relHeading != null && gyroOff[b] != null)\n    ? ((relHeading - gyroOff[b]) % 360 + 360) % 360\n    : (((devHeading == null ? offsetFor(b) : devHeading) - offsetFor(b)) + 360) % 360;\n  // تثبيت الاتجاه: h = اتجاه المستخدم الحقيقي على الخريطة الآن\n  function lockHeading(b, h) {\n    if (devHeading != null) setOffset(b, devHeading - h);          // احتياط إذا الجايرو غير متوفر\n    if (relHeading != null) gyroOff[b] = (((relHeading - h) % 360) + 360) % 360;\n    travel = ((h % 360) + 360) % 360; travelB = b; // يثبت الاتجاه ولا يتأثر بلفّ الجوال\n  }\n  function resetGyro() { relHeading = null; hDead = null; travel = null; travelB = null; for (const k in gyroOff) delete gyroOff[k]; }\n  const isLocked = b => relHeading != null && gyroOff[b] != null;\n  // اتجاه الجهاز الأمامي من alpha/beta/gamma (يعمل سواء الجوال مسطّح أو شبه عمودي)\n  function gyroHeading(alpha, beta, gamma) {\n    const r = Math.PI / 180, ca = Math.cos(alpha * r), sa = Math.sin(alpha * r);\n    const cb = Math.cos(beta * r), sb = Math.sin(beta * r), cg = Math.cos(gamma * r), sg = Math.sin(gamma * r);\n    const fx = (-sa * cb) + (-ca * sg - sa * sb * cg);   // أعلى الجهاز + ظهر الجهاز\n    const fy = (ca * cb) + (-sa * sg + ca * sb * cg);\n    if (Math.hypot(fx, fy) < 1e-6) return null;\n    return (Math.atan2(fx, fy) * 180 / Math.PI + 360) % 360;\n  }\n  const mapHeading = () => mapHeadingFor(selectedBldg);\n  const matchesFloor = () => pos && posCtx && posCtx.b === selectedBldg && posCtx.f === selectedFloor;\n\n  function proj(P, a, b) {\n    const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;\n    let t = L2 ? ((P.x - a.x) * dx + (P.y - a.y) * dy) / L2 : 0;\n    t = Math.max(0, Math.min(1, t));\n    const pt = { x: a.x + t * dx, y: a.y + t * dy };\n    return { pt, t, d: dist(P, pt) };\n  }\n\n  /* ---------- بناء الرسم البياني للممرات (لكل مبنى/دور، ويُحفظ) ---------- */\n  function collectSegments(b, f) {\n    const fl = campusData[b][f];\n    const segs = [];\n    const parse = s => s.trim().split(/\\s+/).map(p => { const [x, y] = p.split(',').map(Number); return { x, y }; });\n    const add = pts => { for (let i = 0; i < pts.length - 1; i++) segs.push({ a: pts[i], b: pts[i + 1] }); };\n    const tmp = document.createElement('div');\n    tmp.innerHTML = '<svg xmlns=\"' + NS + '\">' + fl.corridorsSvg + '<\/svg>';\n    tmp.querySelectorAll('polyline').forEach(pl => add(parse(pl.getAttribute('points'))));\n    fl.rooms.forEach(r => add(parse(r.routePoints)));\n    return segs.filter(s => dist(s.a, s.b) > 0.5);\n  }\n\n  function computeGraph(b, f) {\n    const segs = collectSegments(b, f);\n    const splits = segs.map(() => []), extra = [];\n    segs.forEach((s, i) => [s.a, s.b].forEach(P => segs.forEach((t, j) => {\n      if (i === j) return;\n      const q = proj(P, t.a, t.b);\n      if (q.d <= CFG.joinTol) { splits[j].push(q.pt); if (q.d > 0.5) extra.push({ a: P, b: q.pt }); }\n    })));\n    const all = [];\n    segs.forEach((s, i) => {\n      const pts = [s.a, s.b, ...splits[i]].map(p => ({ p, t: proj(p, s.a, s.b).t })).sort((u, v) => u.t - v.t).map(o => o.p);\n      for (let k = 0; k < pts.length - 1; k++) if (dist(pts[k], pts[k + 1]) > 0.5) all.push({ a: pts[k], b: pts[k + 1] });\n    });\n    extra.forEach(e => all.push(e));\n    const nodes = [], adj = [], edges = [];\n    const nid = p => {\n      let k = nodes.findIndex(n => dist(n, p) < 4);\n      if (k < 0) { nodes.push({ x: p.x, y: p.y }); adj.push([]); k = nodes.length - 1; }\n      return k;\n    };\n    const seen = new Set();\n    all.forEach(e => {\n      const u = nid(e.a), v = nid(e.b);\n      if (u === v) return;\n      const key = u < v ? u + '-' + v : v + '-' + u;\n      if (seen.has(key)) return; // نفس الممر مكرر من أكثر من قاعة\n      seen.add(key);\n      const w = dist(nodes[u], nodes[v]);\n      edges.push({ u, v, a: nodes[u], b: nodes[v], w });\n      adj[u].push({ to: v, w }); adj[v].push({ to: u, w });\n    });\n    return { nodes, edges, adj };\n  }\n\n  const graphCache = {};\n  const graphFor = (b, f) => graphCache[b + '|' + f] || (graphCache[b + '|' + f] = computeGraph(b, f));\n  const cur = () => graphFor(selectedBldg, selectedFloor);\n\n  function snap(P, g) {\n    let best = null;\n    for (const e of g.edges) { const q = proj(P, e.a, e.b); if (!best || q.d < best.d) best = { pt: q.pt, e, d: q.d }; }\n    return best;\n  }\n  const nearestNode = (P, g) => g.nodes.reduce((b, n, i) => (b < 0 || dist(n, P) < dist(g.nodes[b], P)) ? i : b, -1);\n\n  function shortestPath(from, to, g) {\n    const nodes = g.nodes, adj = g.adj;\n    const n = nodes.length, D = Array(n).fill(Infinity), prev = Array(n).fill(-1), done = Array(n).fill(false);\n    D[from.e.u] = dist(from.pt, from.e.a);\n    D[from.e.v] = Math.min(D[from.e.v], dist(from.pt, from.e.b));\n    for (;;) {\n      let u = -1;\n      for (let i = 0; i < n; i++) if (!done[i] && D[i] < Infinity && (u < 0 || D[i] < D[u])) u = i;\n      if (u < 0 || u === to) break;\n      done[u] = true;\n      adj[u].forEach(({ to: v, w }) => { if (D[u] + w < D[v]) { D[v] = D[u] + w; prev[v] = u; } });\n    }\n    if (D[to] === Infinity) return null;\n    const path = [];\n    for (let c = to; c !== -1; c = prev[c]) path.push(nodes[c]);\n    path.reverse(); path.unshift(from.pt);\n    return path;\n  }\n\n  /* ---------- الحركة: تنزلق النقطة على الممرات فقط ---------- */\n  function move(stride, g, b, hdg) {\n    const th = (hdg != null ? hdg : mapHeadingFor(b)) * Math.PI / 180, h = { x: Math.sin(th), y: -Math.cos(th) };\n    let best = null;\n    for (const e of g.edges) {\n      const q = proj(pos, e.a, e.b);\n      if (q.d > CFG.snapR) continue;\n      const ux = (e.b.x - e.a.x) / e.w, uy = (e.b.y - e.a.y) / e.w;\n      for (const sg of [1, -1]) {\n        if (sg * (ux * h.x + uy * h.y) < CFG.minAlign) continue;\n        const c = proj({ x: q.pt.x + sg * ux * stride, y: q.pt.y + sg * uy * stride }, e.a, e.b);\n        if (dist(c.pt, pos) > stride * 1.5) continue; // لا نقفز أكثر من خطوة واحدة\n        const gain = (c.pt.x - pos.x) * h.x + (c.pt.y - pos.y) * h.y;\n        if (!best || gain > best.gain) best = { gain, pt: c.pt };\n      }\n    }\n    if (!best || best.gain < stride * 0.15) return false; // جدار أو نهاية ممر\n    const mvx = best.pt.x - pos.x, mvy = best.pt.y - pos.y;\n    if (travel != null && travelB === b && Math.hypot(mvx, mvy) > 0.1) travel = (Math.atan2(mvx, -mvy) * 180 / Math.PI + 360) % 360;\n    pos = best.pt;\n    return true;\n  }\n\n  function hint(msg) {\n    const t = Date.now();\n    if (t - lastHint > 8000) { lastHint = t; toast(msg); }\n  }\n\n  function onStep(dt) {\n    if (!pos || !posCtx) { hint('امسح QR (📷) لتحديد موقعك أولاً'); return; }\n    if (devHeading == null && relHeading == null) { hint('بانتظار قراءة البوصلة… حرّك الجوال حركة رقم 8'); return; }\n    steps++;\n    // التتبع يستمر على دور/مبنى المستخدم حتى لو كان يتصفح خريطة غيره\n    // الخطوة تتبع إيقاع مشيك: أسرع → أطول شوي، أبطأ → أقصر (حدود 0.8–1.25)\n    const k = dt > 0 ? Math.max(0.8, Math.min(1.25, 1 + (520 - dt) / 1000)) : 1;\n    // بعد المعايرة: نكمل على اتجاه الممر الثابت ونتجاهل تمايل/لفّ الجوال، ونأخذ اتجاه الجايرو فقط إذا لفّيتي لفّة حقيقية\n    let hd = null;\n    if (travel != null && travelB === posCtx.b) {\n      const gh = mapHeadingFor(posCtx.b);\n      hd = Math.abs(angDiff(gh, travel)) < CFG.holdDeg ? travel : gh;\n    }\n    const moved = move(CFG.strideM * CFG.pxPerM * k, graphFor(posCtx.b, posCtx.f), posCtx.b, hd);\n    if (matchesFloor()) {\n      if (moved) updateRoute();\n      render();\n    } else {\n      hint('موقعك مسجّل في مبنى ' + posCtx.b + ' — ' + posCtx.f + '. إذا انتقلت لدور أو مبنى آخر امسح QR هناك لتحديث موقعك');\n    }\n    if (stepsEl) stepsEl.textContent = String(steps);\n  }\n\n  /* ---------- المسار من الموقع الحالي ---------- */\n  function updateRoute() {\n    if (!matchesFloor() || !dest) return;\n    const g = cur(), s = snap(pos, g), t = nearestNode(dest, g);\n    if (!s || t < 0) return;\n    const path = shortestPath(s, t, g);\n    if (!path) return;\n    document.getElementById('routePath').setAttribute('d', 'M ' + path.map(p => p.x + ' ' + p.y).join(' L '));\n    let len = 0;\n    for (let i = 1; i < path.length; i++) len += dist(path[i - 1], path[i]);\n    const info = document.getElementById('infoText');\n    info.innerText = dist(pos, dest) <= CFG.arriveR\n      ? 'وصلت إلى ' + dest.label\n      : dest.label + ' — المتبقي تقريباً ' + Math.round(len / CFG.pxPerM) + ' م';\n  }\n\n  // اتجاه أول مقطع من المسار الأخضر (بدرجات الخريطة: 0 = أعلى، 90 = يمين)\n  function routeDirection() {\n    if (!dest || !matchesFloor()) return null;\n    const g = cur(), s = snap(pos, g), t = nearestNode(dest, g);\n    if (!s || t < 0) return null;\n    const path = shortestPath(s, t, g);\n    if (!path) return null;\n    for (let i = 1; i < path.length; i++) {\n      if (dist(path[0], path[i]) > 4) {\n        return (Math.atan2(path[i].x - path[0].x, -(path[i].y - path[0].y)) * 180 / Math.PI + 360) % 360;\n      }\n    }\n    return null;\n  }\n\n  function render() {\n    if (!markerEl) return;\n    if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }\n    markerEl.setAttribute('display', 'block');\n    if (!disp || dist(disp, pos) > CFG.strideM * CFG.pxPerM * 4) disp = { x: pos.x, y: pos.y }; // قفزة (QR) → فوري\n    hTarget = arrowTarget();\n    if (hDisp == null) hDisp = hTarget;\n    paint();\n    if (!animRaf) { animT = performance.now(); animRaf = requestAnimationFrame(animate); }\n  }\n  // اتجاه الكاشف الأزرق: قبل المعايرة يتبع البوصلة، وبعدها ثابت على اتجاه الممر ولا يلف مع الجوال أبداً\n  function arrowTarget() {\n    if (travel != null && travelB === selectedBldg) return travel;\n    return mapHeading();\n  }\n  function paint() {\n    markerEl.setAttribute('transform', 'translate(' + disp.x + ',' + disp.y + ')');\n    arrowEl.setAttribute('transform', 'rotate(' + hDisp + ')');\n  }\n  // النقطة تلحق موضع الخطوة بنعومة، والكاشف يدور بهدوء (أبطأ قبل المعايرة، وأهدأ بعدها)\n  function animate(now) {\n    animRaf = 0;\n    if (!pos || !disp || !matchesFloor()) return;\n    const dt = Math.min(64, now - animT); animT = now;\n    const a = 1 - Math.exp(-dt / 60);\n    disp.x += (pos.x - disp.x) * a; disp.y += (pos.y - disp.y) * a;\n    const tc = isLocked(selectedBldg) ? CFG.arrowTcLocked : CFG.arrowTc;\n    hDisp = (hDisp + angDiff(hTarget, hDisp) * (1 - Math.exp(-dt / tc)) + 360) % 360;\n    paint();\n    if (dist(disp, pos) > 0.3 || Math.abs(angDiff(hTarget, hDisp)) > 0.5) animRaf = requestAnimationFrame(animate);\n  }\n\n  function setPos(x, y, b, f) {\n    const s = snap({ x, y }, graphFor(b, f));\n    pos = s ? s.pt : { x, y };\n    posCtx = { b, f };\n    disp = null;\n  }\n\n  /* ---------- QR ---------- */\n  function findRoom(id) {\n    for (const b in campusData) for (const f in campusData[b]) {\n      const room = campusData[b][f].rooms.find(r => r.id === id);\n      if (room) return { b, f, room };\n    }\n    return null;\n  }\n  const lastPoint = room => room.routePoints.split(' ').pop().split(',').map(Number);\n\n  // صيغ الرابط: ?from=A-G-5 (موقعك عند باب القاعة)  أو  ?bldg=A&floor=Ground&x=232&y=495&h=0 (موقعك بإحداثيات)\n  // وأي منهما مع  &room=A-G-9  لاختيار الوجهة.  ?bldg=B&floor=Ground&room=B-G-11 وحدها تفتح الوجهة فقط.\n  function applyParams(p) {\n    let b = p.get('bldg'), f = p.get('floor');\n    f = FLOOR_ALIAS[f] || f;\n    let x = parseFloat(p.get('x')), y = parseFloat(p.get('y'));\n    const from = p.get('from') && findRoom(p.get('from'));\n    if (from) { b = from.b; f = from.f; [x, y] = lastPoint(from.room); }\n    const rr = p.get('room') && findRoom(p.get('room'));\n    const hasStart = campusData[b] && campusData[b][f] && !isNaN(x) && !isNaN(y);\n    if (!hasStart) { if (!rr) return false; b = rr.b; f = rr.f; }\n    if (b !== selectedBldg || f !== selectedFloor) {\n      selectBuilding(b); selectedFloor = f; renderFloorsMenu(); renderBlueprint();\n    }\n    if (hasStart) {\n      setPos(x, y, b, f);\n      const h = parseFloat(p.get('h'));\n      if (!isNaN(h)) { lockHeading(b, h); if (devHeading == null) pendingH = { b, h }; }\n      toast('تم تحديد موقعك');\n    }\n    if (rr && rr.b === selectedBldg && rr.f === selectedFloor) {\n      document.getElementById('roomDropdown').value = rr.room.id;\n      highlightAndRoute();\n    }\n    render(); updateRoute();\n    return true;\n  }\n  function handleQrText(text) {\n    try { const u = new URL(text, location.href); return applyParams(u.searchParams); } catch (e) { return false; }\n  }\n\n  const loadScript = src => new Promise((res, rej) => {\n    const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s);\n  });\n  const JSQR_SRC = [\n    'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',\n    'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js'\n  ];\n  async function ensureJsQR() {\n    if (window.jsQR) return true;\n    for (const src of JSQR_SRC) { try { await loadScript(src); if (window.jsQR) return true; } catch (e) { /* التالي */ } }\n    return false;\n  }\n\n  async function scanQr() {\n    if (typeof closeQrModal === 'function') closeQrModal();\n    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('المتصفح لا يدعم الكاميرا (يلزم HTTPS)'); return; }\n    const ov = document.createElement('div');\n    ov.style.cssText = 'position:fixed;inset:0;z-index:300;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px';\n    ov.innerHTML = '<video playsinline muted autoplay style=\"max-width:100%;max-height:75%\"><\/video><button class=\"close-btn\">إلغاء<\/button>';\n    document.body.appendChild(ov);\n    const video = ov.querySelector('video');\n    video.setAttribute('playsinline', ''); video.muted = true;\n    let stream, stop = false;\n    const close = () => { stop = true; if (stream) stream.getTracks().forEach(t => t.stop()); ov.remove(); };\n    ov.querySelector('button').onclick = close;\n    try {\n      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });\n      video.srcObject = stream; await video.play();\n    } catch (e) { close(); toast('تعذر فتح الكاميرا (يلزم HTTPS وإذن الكاميرا)'); return; }\n    let det = null;\n    if ('BarcodeDetector' in window) { try { det = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { det = null; } }\n    if (!det && !(await ensureJsQR())) { close(); toast('تعذر تحميل قارئ QR'); return; }\n    const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });\n    const tick = async () => {\n      if (stop) return;\n      try {\n        let text = null;\n        if (det) { const r = await det.detect(video); if (r[0]) text = r[0].rawValue; }\n        if (!text && !det && video.videoWidth) {\n          const k = Math.min(1, 640 / video.videoWidth);\n          cv.width = Math.round(video.videoWidth * k); cv.height = Math.round(video.videoHeight * k);\n          cx.drawImage(video, 0, 0, cv.width, cv.height);\n          const im = cx.getImageData(0, 0, cv.width, cv.height), r = window.jsQR(im.data, im.width, im.height, { inversionAttempts: 'dontInvert' });\n          if (r) text = r.data;\n        }\n        if (text) {\n          if (handleQrText(text)) { close(); return; }\n          hint('هذا الباركود ليس تابعاً لخريطة الكلية');\n        }\n      } catch (e) { /* نكمل */ }\n      setTimeout(tick, 150);\n    };\n    tick();\n  }\n\n  /* ---------- المستشعرات ---------- */\n  function gotHeading(h) {\n    devHeading = h;\n    if (pendingH != null) { setOffset(pendingH.b, h - pendingH.h); pendingH = null; }\n  }\n  function onMotion(e) {\n    const a = e.accelerationIncludingGravity;\n    if (!a || a.x == null) return;\n    const t = performance.now(), rr = e.rotationRate;\n    if (rr && Math.hypot(rr.alpha || 0, rr.beta || 0, rr.gamma || 0) > CFG.maxRot) rotT = t; // جوال يتحرك بسرعة\n    const m = Math.hypot(a.x, a.y, a.z);\n    avg = avg * 0.9 + m * 0.1;\n    const d = m - avg;\n    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) stepCandidate(t, d1);\n    d2 = d1; d1 = d;\n  }\n  // الخطوة تنحسب فقط إذا طلعت بإيقاع مشي منتظم (خطوتين متتاليتين)، وتتجاهل نفض/تدوير الجوال\n  function stepCandidate(t, peak) {\n    if (peak > CFG.stepMaxPeak || t - rotT < 350) return;\n    const dt = t - lastStepT;\n    lastStepT = t;\n    if (dt > CFG.walkTimeout) { seq = 1; lastDt = 0; cad = 0; return; }       // بداية مشي جديد\n    if (lastDt && Math.abs(dt - lastDt) > lastDt * 0.65) { seq = 1; lastDt = 0; return; } // إيقاع غير منتظم\n    lastDt = dt; cad = cad ? cad * 0.6 + dt * 0.4 : dt;\n    seq++;\n    if (seq === 2) onStep(cad); // الخطوة الأولى المعلّقة\n    onStep(cad);\n  }\n  function onOri(e) {\n    const isAbs = e.type === 'deviceorientationabsolute' || e.absolute === true;\n    // (أ) الجايرو: قراءة نسبية غير مغناطيسية → للتثبيت بعد المعايرة\n    if (!isAbs && e.alpha != null && e.beta != null && e.gamma != null) {\n      const g = gyroHeading(e.alpha, e.beta, e.gamma);\n      if (g != null) relHeading = relHeading == null ? g : (relHeading + angDiff(g, relHeading) * 0.35 + 360) % 360;\n    }\n    // (ب) البوصلة: كما كانت (تُستخدم قبل المعايرة أو إذا الجايرو غير متوفر)\n    let h = null;\n    if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;\n    else if (e.absolute && e.alpha != null) h = (360 - e.alpha) % 360;\n    if (h != null) gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.25 + 360) % 360);\n    render();\n  }\n  async function toggleTracking() {\n    if (tracking) {\n      removeEventListener('devicemotion', onMotion);\n      removeEventListener('deviceorientation', onOri, true);\n      removeEventListener('deviceorientationabsolute', onOri, true);\n      tracking = false; resetGyro(); trackBtn.classList.remove('on'); trackBtn.textContent = '📍'; trackBtn.title = 'تفعيل التتبع';\n      return;\n    }\n    try {\n      // آيفون/سفاري: نطلب الإذنين معاً وبشكل مباشر من ضغطة الزر (قبل أي await) وإلا يُرفض الطلب\n      const reqs = [];\n      if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') reqs.push(DeviceMotionEvent.requestPermission());\n      if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') reqs.push(DeviceOrientationEvent.requestPermission());\n      if (reqs.length) {\n        const res = await Promise.all(reqs.map(r => Promise.resolve(r).catch(() => 'denied')));\n        if (res.some(r => r !== 'granted')) { toast('تم رفض إذن الحركة والاتجاه — فعّله من إعدادات سفاري للموقع ثم أعد المحاولة'); return; }\n      }\n    } catch (e) { toast('تعذر طلب إذن المستشعرات (يلزم HTTPS)'); return; }\n    resetGyro(); // مرجع الجايرو يبدأ من جديد مع كل تشغيل للتتبع → لازم معايرة جديدة\n    addEventListener('devicemotion', onMotion);\n    addEventListener('deviceorientation', onOri, true);\n    addEventListener('deviceorientationabsolute', onOri, true);\n    tracking = true; trackBtn.classList.add('on'); trackBtn.textContent = '⏹'; trackBtn.title = 'إيقاف التتبع';\n    toast(pos ? 'ابدأ المشي' : 'امسح QR (📷) لتحديد موقعك أولاً');\n    setTimeout(() => { if (tracking && devHeading == null) toast('لا تصل قراءة البوصلة — تأكد من السماح بالحركة والاتجاه للمتصفح'); }, 3000);\n  }\n  // المعايرة: قف وواجه اتجاه المسار الأخضر (أو أعلى الخريطة إن لم يكن هناك مسار) ثم اضغط\n  // بعدها يتثبّت الاتجاه على الجايرو ولا تؤثر عليه البوصلة المغناطيسية حتى تعاير من جديد\n  function calibrate() {\n    if (devHeading == null && relHeading == null) { toast('فعّل التتبع أولاً'); return; }\n    const dir = routeDirection();\n    lockHeading(selectedBldg, dir == null ? 0 : dir);\n    render(); updateRoute();\n    const locked = relHeading != null;\n    toast(dir == null\n      ? 'تمت المعايرة على أن وجهك نحو أعلى الخريطة. للأفضل: حدّد قاعة وواجه اتجاه الخط الأخضر ثم أعد المعايرة'\n      : (locked ? 'تمت المعايرة وتثبيت الاتجاه ✓' : 'تمت معايرة مبنى ' + selectedBldg + ' (جهازك لا يدعم التثبيت بالجايرو، تعمل بالبوصلة)'));\n  }\n\n  /* ---------- واجهة ---------- */\n  function toast(msg) {\n    const t = document.createElement('div');\n    t.className = 'pdr-toast'; t.textContent = msg;\n    document.body.appendChild(t);\n    setTimeout(() => t.remove(), 3500);\n  }\n  function buildUI() {\n    const st = document.createElement('style');\n    st.textContent =\n      '.pdr-bar{position:fixed;left:calc(6px + env(safe-area-inset-left,0px));top:50%;transform:translateY(-50%);z-index:115;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}' +\n      '.pdr-bar>*{pointer-events:auto}' +\n      '.pdr-bar button{width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;background:var(--panel-bg,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-main,#f1f5f9);border-radius:50%;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:.92;-webkit-tap-highlight-color:transparent}' +\n      '.pdr-bar button.on{background:var(--primary-green,#10b981);opacity:1}' +\n      '.pdr-bar span{font-size:10px;color:var(--text-sub,#94a3b8);background:var(--panel-bg,#1e293b);border-radius:8px;padding:2px 6px;opacity:.92}' +\n      '.pdr-toast{position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:400;background:var(--panel-bg,#1e293b);color:var(--text-main,#f1f5f9);border:1px solid var(--primary-green,#10b981);padding:8px 16px;border-radius:10px;font-size:12px;max-width:90vw;text-align:center}';\n    document.head.appendChild(st);\n    const bar = document.createElement('div');\n    bar.className = 'pdr-bar';\n    bar.innerHTML = '<button id=\"pdrTrack\" title=\"تفعيل التتبع\" aria-label=\"تفعيل التتبع\">📍<\/button><button id=\"pdrScan\" title=\"مسح QR\" aria-label=\"مسح QR\">📷<\/button><button id=\"pdrCal\" title=\"معايرة الاتجاه\" aria-label=\"معايرة الاتجاه\">🧭<\/button>';\n    document.body.appendChild(bar);\n    trackBtn = bar.querySelector('#pdrTrack'); stepsEl = bar.querySelector('#pdrSteps');\n    trackBtn.onclick = toggleTracking;\n    bar.querySelector('#pdrScan').onclick = scanQr;\n    bar.querySelector('#pdrCal').onclick = calibrate;\n\n    markerEl = document.createElementNS(NS, 'g');\n    markerEl.setAttribute('display', 'none');\n    markerEl.id = 'pdrMarker'; // يستخدمه nav-mode.js لإخفاء المؤشر القديم أثناء التنقل\n    markerEl.innerHTML = '<circle r=\"22\" fill=\"rgba(37,99,235,.35)\" class=\"ping-ring\"/><g id=\"pdrArrow\"><polygon points=\"0,-22 9,-8 -9,-8\" fill=\"#60a5fa\"/><\/g><circle r=\"9\" fill=\"#2563eb\" stroke=\"#fff\" stroke-width=\"3\"/>';\n    document.getElementById('navigationSvg').appendChild(markerEl);\n    arrowEl = markerEl.querySelector('#pdrArrow');\n  }\n\n  /* ---------- ربط بدون تعديل الكود الأصلي ---------- */\n  const _render = window.renderBlueprint;\n  window.renderBlueprint = function () { _render.apply(this, arguments); render(); };\n\n  const _clear = window.clearNavigation;\n  window.clearNavigation = function () { dest = null; _clear.apply(this, arguments); };\n\n  const _hr = window.highlightAndRoute;\n  window.highlightAndRoute = function () {\n    _hr.apply(this, arguments);\n    const id = document.getElementById('roomDropdown').value;\n    const room = id && campusData[selectedBldg][selectedFloor].rooms.find(r => r.id === id);\n    if (room) { const q = lastPoint(room); dest = { x: q[0], y: q[1], label: room.label.replace('\\n', ' ') }; updateRoute(); }\n    else dest = null;\n  };\n\n  buildUI();\n\n  // محاكاة بالكيبورد للتجربة على الكمبيوتر: ↑ خطوة، ←/→ تدوير 15°\n  addEventListener('keydown', e => {\n    if (!pos || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;\n    if (devHeading == null) gotHeading(offsetFor(posCtx.b));\n    if (e.key === 'ArrowUp') { onStep(); e.preventDefault(); }\n    else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {\n      devHeading = (devHeading + (e.key === 'ArrowLeft' ? -15 : 15) + 360) % 360; render(); e.preventDefault();\n    }\n  });\n\n  addEventListener('load', () => {\n    const p = new URLSearchParams(location.search);\n    if ([...p.keys()].length) applyParams(p);\n  });\n\n  window.PDR = {\n    cfg: CFG, setPos, calibrate, applyParams, scan: scanQr, graph: () => cur(),\n    state: () => ({ pos, posCtx, dest, devHeading, relHeading, locked: relHeading != null && gyroOff[selectedBldg] != null, steps }),\n    // مضافة لوضع التنقل (nav-mode.js)\n    heading: mapHeading, matches: matchesFloor, routeDirection,\n    isTracking: () => tracking, toggleTracking\n  };\n})();\n";
-const msg = document.getElementById('msg'), ta = document.getElementById('ta');
-const say = t => { msg.textContent = t; };
-document.getElementById('dl').addEventListener('click', async () => {
-  let d = null;
-  try { d = await claude.use('downloads'); } catch (e) { d = null; }
-  if (!d) { say('التحميل غير متاح هنا، استخدمي زر النسخ'); return; }
-  try {
-    const r = await d.save({ filename: 'pdr-nav.txt', data: CODE });
-    say(r.status === 'saved' ? '✓ تم الحفظ — لا تنسين تغيير الامتداد إلى .js' : '✓ تم');
-  } catch (e) {
-    say(e && e.code === 'declined' ? 'تم إلغاء الحفظ' : 'تعذر التحميل، جرّبي زر النسخ');
+/* pdr-nav.js — إضافة PDR + QR + تثبيت الموقع على الممرات (Map Matching)
+   تُضاف قبل </body> وبعد السكربت الأساسي:  <script src="pdr-nav.js"></script>
+   لا تعدّل بيانات الخريطة؛ تغلّف الدوال الحالية فقط. */
+(function () {
+  'use strict';
+  const NS = 'http://www.w3.org/2000/svg';
+  const CFG = window.PDR_CONFIG = Object.assign({
+    pxPerM: 14,           // بكسل لكل متر (تقدير من أبعاد القاعات والممرات — يُضبط بالقياس الفعلي)
+    strideM: 0.7,         // طول الخطوة بالمتر
+    snapR: 12,            // نصف قطر البحث عن الممر
+    minAlign: 0.35,       // أقل توافق بين اتجاه المشي واتجاه الممر
+    stepMinMs: 320,       // أقل زمن بين خطوتين
+    stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
+    joinTol: 14,          // مسافة ربط الخطوط ببعض
+    arriveR: 18,          // مسافة الوصول (بكسل)
+    buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
+  }, window.PDR_CONFIG || {});
+  const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
+
+  let pos = null, posCtx = null, dest = null;
+  let tracking = false, devHeading = null, pendingH = null, steps = 0;
+  let relHeading = null;   // اتجاه الجايرو (لا يتأثر بالمغناطيس) — مرجعه عشوائي لكنه ثابت أثناء التتبع
+  const gyroOff = {};      // بعد المعايرة: فرق الجايرو عن اتجاه الخريطة لكل مبنى (في الذاكرة فقط، لا يُحفظ)
+  let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;
+  let markerEl, arrowEl, stepsEl, trackBtn;
+
+  /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */
+  const store = {
+    get() { try { return JSON.parse(localStorage.getItem('pdr_offsets') || '{}') || {}; } catch (e) { return {}; } },
+    set(o) { try { localStorage.setItem('pdr_offsets', JSON.stringify(o)); } catch (e) { /* سفاري الخاص */ } }
+  };
+  const offsets = store.get();
+  const setOffset = (b, v) => { offsets[b] = ((v % 360) + 360) % 360; store.set(offsets); };
+
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const angDiff = (a, b) => ((a - b + 540) % 360) - 180;
+  const offsetFor = b => offsets[b] != null ? offsets[b] : (CFG.buildingNorth[b] || 0);
+  // بعد المعايرة: الاتجاه يعتمد على الجايرو فقط (مثبّت)، وقبلها يعتمد على البوصلة كما كان
+  const mapHeadingFor = b => (relHeading != null && gyroOff[b] != null)
+    ? ((relHeading - gyroOff[b]) % 360 + 360) % 360
+    : (((devHeading == null ? offsetFor(b) : devHeading) - offsetFor(b)) + 360) % 360;
+  // تثبيت الاتجاه: h = اتجاه المستخدم الحقيقي على الخريطة الآن
+  function lockHeading(b, h) {
+    if (devHeading != null) setOffset(b, devHeading - h);          // احتياط إذا الجايرو غير متوفر
+    if (relHeading != null) gyroOff[b] = (((relHeading - h) % 360) + 360) % 360;
   }
-});
-document.getElementById('cp').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(CODE); say('✓ تم نسخ الكود كامل'); return; } catch (e) { /* نجرب الطريقة الثانية */ }
-  ta.style.display = 'block'; ta.value = CODE; ta.focus(); ta.select();
-  try { say(document.execCommand('copy') ? '✓ تم نسخ الكود كامل' : 'حددي الكود في المربع وانسخيه'); } catch (e) { say('حددي الكود في المربع وانسخيه'); }
-});
-</script>
-</body>
-</html>
+  function resetGyro() { relHeading = null; for (const k in gyroOff) delete gyroOff[k]; }
+  // اتجاه الجهاز الأمامي من alpha/beta/gamma (يعمل سواء الجوال مسطّح أو شبه عمودي)
+  function gyroHeading(alpha, beta, gamma) {
+    const r = Math.PI / 180, ca = Math.cos(alpha * r), sa = Math.sin(alpha * r);
+    const cb = Math.cos(beta * r), sb = Math.sin(beta * r), cg = Math.cos(gamma * r), sg = Math.sin(gamma * r);
+    const fx = (-sa * cb) + (-ca * sg - sa * sb * cg);   // أعلى الجهاز + ظهر الجهاز
+    const fy = (ca * cb) + (-sa * sg + ca * sb * cg);
+    if (Math.hypot(fx, fy) < 1e-6) return null;
+    return (Math.atan2(fx, fy) * 180 / Math.PI + 360) % 360;
+  }
+  const mapHeading = () => mapHeadingFor(selectedBldg);
+  const matchesFloor = () => pos && posCtx && posCtx.b === selectedBldg && posCtx.f === selectedFloor;
+
+  function proj(P, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+    let t = L2 ? ((P.x - a.x) * dx + (P.y - a.y) * dy) / L2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const pt = { x: a.x + t * dx, y: a.y + t * dy };
+    return { pt, t, d: dist(P, pt) };
+  }
+
+  /* ---------- بناء الرسم البياني للممرات (لكل مبنى/دور، ويُحفظ) ---------- */
+  function collectSegments(b, f) {
+    const fl = campusData[b][f];
+    const segs = [];
+    const parse = s => s.trim().split(/\s+/).map(p => { const [x, y] = p.split(',').map(Number); return { x, y }; });
+    const add = pts => { for (let i = 0; i < pts.length - 1; i++) segs.push({ a: pts[i], b: pts[i + 1] }); };
+    const tmp = document.createElement('div');
+    tmp.innerHTML = '<svg xmlns="' + NS + '">' + fl.corridorsSvg + '</svg>';
+    tmp.querySelectorAll('polyline').forEach(pl => add(parse(pl.getAttribute('points'))));
+    fl.rooms.forEach(r => add(parse(r.routePoints)));
+    return segs.filter(s => dist(s.a, s.b) > 0.5);
+  }
+
+  function computeGraph(b, f) {
+    const segs = collectSegments(b, f);
+    const splits = segs.map(() => []), extra = [];
+    segs.forEach((s, i) => [s.a, s.b].forEach(P => segs.forEach((t, j) => {
+      if (i === j) return;
+      const q = proj(P, t.a, t.b);
+      if (q.d <= CFG.joinTol) { splits[j].push(q.pt); if (q.d > 0.5) extra.push({ a: P, b: q.pt }); }
+    })));
+    const all = [];
+    segs.forEach((s, i) => {
+      const pts = [s.a, s.b, ...splits[i]].map(p => ({ p, t: proj(p, s.a, s.b).t })).sort((u, v) => u.t - v.t).map(o => o.p);
+      for (let k = 0; k < pts.length - 1; k++) if (dist(pts[k], pts[k + 1]) > 0.5) all.push({ a: pts[k], b: pts[k + 1] });
+    });
+    extra.forEach(e => all.push(e));
+    const nodes = [], adj = [], edges = [];
+    const nid = p => {
+      let k = nodes.findIndex(n => dist(n, p) < 4);
+      if (k < 0) { nodes.push({ x: p.x, y: p.y }); adj.push([]); k = nodes.length - 1; }
+      return k;
+    };
+    const seen = new Set();
+    all.forEach(e => {
+      const u = nid(e.a), v = nid(e.b);
+      if (u === v) return;
+      const key = u < v ? u + '-' + v : v + '-' + u;
+      if (seen.has(key)) return; // نفس الممر مكرر من أكثر من قاعة
+      seen.add(key);
+      const w = dist(nodes[u], nodes[v]);
+      edges.push({ u, v, a: nodes[u], b: nodes[v], w });
+      adj[u].push({ to: v, w }); adj[v].push({ to: u, w });
+    });
+    return { nodes, edges, adj };
+  }
+
+  const graphCache = {};
+  const graphFor = (b, f) => graphCache[b + '|' + f] || (graphCache[b + '|' + f] = computeGraph(b, f));
+  const cur = () => graphFor(selectedBldg, selectedFloor);
+
+  function snap(P, g) {
+    let best = null;
+    for (const e of g.edges) { const q = proj(P, e.a, e.b); if (!best || q.d < best.d) best = { pt: q.pt, e, d: q.d }; }
+    return best;
+  }
+  const nearestNode = (P, g) => g.nodes.reduce((b, n, i) => (b < 0 || dist(n, P) < dist(g.nodes[b], P)) ? i : b, -1);
+
+  function shortestPath(from, to, g) {
+    const nodes = g.nodes, adj = g.adj;
+    const n = nodes.length, D = Array(n).fill(Infinity), prev = Array(n).fill(-1), done = Array(n).fill(false);
+    D[from.e.u] = dist(from.pt, from.e.a);
+    D[from.e.v] = Math.min(D[from.e.v], dist(from.pt, from.e.b));
+    for (;;) {
+      let u = -1;
+      for (let i = 0; i < n; i++) if (!done[i] && D[i] < Infinity && (u < 0 || D[i] < D[u])) u = i;
+      if (u < 0 || u === to) break;
+      done[u] = true;
+      adj[u].forEach(({ to: v, w }) => { if (D[u] + w < D[v]) { D[v] = D[u] + w; prev[v] = u; } });
+    }
+    if (D[to] === Infinity) return null;
+    const path = [];
+    for (let c = to; c !== -1; c = prev[c]) path.push(nodes[c]);
+    path.reverse(); path.unshift(from.pt);
+    return path;
+  }
+
+  /* ---------- الحركة: تنزلق النقطة على الممرات فقط ---------- */
+  function move(stride, g, b) {
+    const th = mapHeadingFor(b) * Math.PI / 180, h = { x: Math.sin(th), y: -Math.cos(th) };
+    let best = null;
+    for (const e of g.edges) {
+      const q = proj(pos, e.a, e.b);
+      if (q.d > CFG.snapR) continue;
+      const ux = (e.b.x - e.a.x) / e.w, uy = (e.b.y - e.a.y) / e.w;
+      for (const sg of [1, -1]) {
+        if (sg * (ux * h.x + uy * h.y) < CFG.minAlign) continue;
+        const c = proj({ x: q.pt.x + sg * ux * stride, y: q.pt.y + sg * uy * stride }, e.a, e.b);
+        if (dist(c.pt, pos) > stride * 1.5) continue; // لا نقفز أكثر من خطوة واحدة
+        const gain = (c.pt.x - pos.x) * h.x + (c.pt.y - pos.y) * h.y;
+        if (!best || gain > best.gain) best = { gain, pt: c.pt };
+      }
+    }
+    if (!best || best.gain < stride * 0.15) return false; // جدار أو نهاية ممر
+    pos = best.pt;
+    return true;
+  }
+
+  function hint(msg) {
+    const t = Date.now();
+    if (t - lastHint > 8000) { lastHint = t; toast(msg); }
+  }
+
+  function onStep() {
+    if (!pos || !posCtx) { hint('امسح QR (📷) لتحديد موقعك أولاً'); return; }
+    if (devHeading == null && relHeading == null) { hint('بانتظار قراءة البوصلة… حرّك الجوال حركة رقم 8'); return; }
+    steps++;
+    // التتبع يستمر على دور/مبنى المستخدم حتى لو كان يتصفح خريطة غيره
+    const moved = move(CFG.strideM * CFG.pxPerM, graphFor(posCtx.b, posCtx.f), posCtx.b);
+    if (matchesFloor()) {
+      if (moved) updateRoute();
+      render();
+    } else {
+      hint('موقعك مسجّل في مبنى ' + posCtx.b + ' — ' + posCtx.f + '. إذا انتقلت لدور أو مبنى آخر امسح QR هناك لتحديث موقعك');
+    }
+    if (stepsEl) stepsEl.textContent = String(steps);
+  }
+
+  /* ---------- المسار من الموقع الحالي ---------- */
+  function updateRoute() {
+    if (!matchesFloor() || !dest) return;
+    const g = cur(), s = snap(pos, g), t = nearestNode(dest, g);
+    if (!s || t < 0) return;
+    const path = shortestPath(s, t, g);
+    if (!path) return;
+    document.getElementById('routePath').setAttribute('d', 'M ' + path.map(p => p.x + ' ' + p.y).join(' L '));
+    let len = 0;
+    for (let i = 1; i < path.length; i++) len += dist(path[i - 1], path[i]);
+    const info = document.getElementById('infoText');
+    info.innerText = dist(pos, dest) <= CFG.arriveR
+      ? 'وصلت إلى ' + dest.label
+      : dest.label + ' — المتبقي تقريباً ' + Math.round(len / CFG.pxPerM) + ' م';
+  }
+
+  // اتجاه أول مقطع من المسار الأخضر (بدرجات الخريطة: 0 = أعلى، 90 = يمين)
+  function routeDirection() {
+    if (!dest || !matchesFloor()) return null;
+    const g = cur(), s = snap(pos, g), t = nearestNode(dest, g);
+    if (!s || t < 0) return null;
+    const path = shortestPath(s, t, g);
+    if (!path) return null;
+    for (let i = 1; i < path.length; i++) {
+      if (dist(path[0], path[i]) > 4) {
+        return (Math.atan2(path[i].x - path[0].x, -(path[i].y - path[0].y)) * 180 / Math.PI + 360) % 360;
+      }
+    }
+    return null;
+  }
+
+  function render() {
+    if (!markerEl) return;
+    if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }
+    markerEl.setAttribute('display', 'block');
+    markerEl.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
+    arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
+  }
+
+  function setPos(x, y, b, f) {
+    const s = snap({ x, y }, graphFor(b, f));
+    pos = s ? s.pt : { x, y };
+    posCtx = { b, f };
+  }
+
+  /* ---------- QR ---------- */
+  function findRoom(id) {
+    for (const b in campusData) for (const f in campusData[b]) {
+      const room = campusData[b][f].rooms.find(r => r.id === id);
+      if (room) return { b, f, room };
+    }
+    return null;
+  }
+  const lastPoint = room => room.routePoints.split(' ').pop().split(',').map(Number);
+
+  // صيغ الرابط: ?from=A-G-5 (موقعك عند باب القاعة)  أو  ?bldg=A&floor=Ground&x=232&y=495&h=0 (موقعك بإحداثيات)
+  // وأي منهما مع  &room=A-G-9  لاختيار الوجهة.  ?bldg=B&floor=Ground&room=B-G-11 وحدها تفتح الوجهة فقط.
+  function applyParams(p) {
+    let b = p.get('bldg'), f = p.get('floor');
+    f = FLOOR_ALIAS[f] || f;
+    let x = parseFloat(p.get('x')), y = parseFloat(p.get('y'));
+    const from = p.get('from') && findRoom(p.get('from'));
+    if (from) { b = from.b; f = from.f; [x, y] = lastPoint(from.room); }
+    const rr = p.get('room') && findRoom(p.get('room'));
+    const hasStart = campusData[b] && campusData[b][f] && !isNaN(x) && !isNaN(y);
+    if (!hasStart) { if (!rr) return false; b = rr.b; f = rr.f; }
+    if (b !== selectedBldg || f !== selectedFloor) {
+      selectBuilding(b); selectedFloor = f; renderFloorsMenu(); renderBlueprint();
+    }
+    if (hasStart) {
+      setPos(x, y, b, f);
+      const h = parseFloat(p.get('h'));
+      if (!isNaN(h)) { lockHeading(b, h); if (devHeading == null) pendingH = { b, h }; }
+      toast('تم تحديد موقعك');
+    }
+    if (rr && rr.b === selectedBldg && rr.f === selectedFloor) {
+      document.getElementById('roomDropdown').value = rr.room.id;
+      highlightAndRoute();
+    }
+    render(); updateRoute();
+    return true;
+  }
+  function handleQrText(text) {
+    try { const u = new URL(text, location.href); return applyParams(u.searchParams); } catch (e) { return false; }
+  }
+
+  const loadScript = src => new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s);
+  });
+  const JSQR_SRC = [
+    'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js'
+  ];
+  async function ensureJsQR() {
+    if (window.jsQR) return true;
+    for (const src of JSQR_SRC) { try { await loadScript(src); if (window.jsQR) return true; } catch (e) { /* التالي */ } }
+    return false;
+  }
+
+  async function scanQr() {
+    if (typeof closeQrModal === 'function') closeQrModal();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('المتصفح لا يدعم الكاميرا (يلزم HTTPS)'); return; }
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:300;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px';
+    ov.innerHTML = '<video playsinline muted autoplay style="max-width:100%;max-height:75%"></video><button class="close-btn">إلغاء</button>';
+    document.body.appendChild(ov);
+    const video = ov.querySelector('video');
+    video.setAttribute('playsinline', ''); video.muted = true;
+    let stream, stop = false;
+    const close = () => { stop = true; if (stream) stream.getTracks().forEach(t => t.stop()); ov.remove(); };
+    ov.querySelector('button').onclick = close;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      video.srcObject = stream; await video.play();
+    } catch (e) { close(); toast('تعذر فتح الكاميرا (يلزم HTTPS وإذن الكاميرا)'); return; }
+    let det = null;
+    if ('BarcodeDetector' in window) { try { det = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { det = null; } }
+    if (!det && !(await ensureJsQR())) { close(); toast('تعذر تحميل قارئ QR'); return; }
+    const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
+    const tick = async () => {
+      if (stop) return;
+      try {
+        let text = null;
+        if (det) { const r = await det.detect(video); if (r[0]) text = r[0].rawValue; }
+        if (!text && !det && video.videoWidth) {
+          const k = Math.min(1, 640 / video.videoWidth);
+          cv.width = Math.round(video.videoWidth * k); cv.height = Math.round(video.videoHeight * k);
+          cx.drawImage(video, 0, 0, cv.width, cv.height);
+          const im = cx.getImageData(0, 0, cv.width, cv.height), r = window.jsQR(im.data, im.width, im.height, { inversionAttempts: 'dontInvert' });
+          if (r) text = r.data;
+        }
+        if (text) {
+          if (handleQrText(text)) { close(); return; }
+          hint('هذا الباركود ليس تابعاً لخريطة الكلية');
+        }
+      } catch (e) { /* نكمل */ }
+      setTimeout(tick, 150);
+    };
+    tick();
+  }
+
+  /* ---------- المستشعرات ---------- */
+  function gotHeading(h) {
+    devHeading = h;
+    if (pendingH != null) { setOffset(pendingH.b, h - pendingH.h); pendingH = null; }
+  }
+  function onMotion(e) {
+    const a = e.accelerationIncludingGravity;
+    if (!a || a.x == null) return;
+    const m = Math.hypot(a.x, a.y, a.z);
+    avg = avg * 0.9 + m * 0.1;
+    const d = m - avg, t = performance.now();
+    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { lastStepT = t; onStep(); }
+    d2 = d1; d1 = d;
+  }
+  function onOri(e) {
+    const isAbs = e.type === 'deviceorientationabsolute' || e.absolute === true;
+    // (أ) الجايرو: قراءة نسبية غير مغناطيسية → للتثبيت بعد المعايرة
+    if (!isAbs && e.alpha != null && e.beta != null && e.gamma != null) {
+      const g = gyroHeading(e.alpha, e.beta, e.gamma);
+      if (g != null) relHeading = relHeading == null ? g : (relHeading + angDiff(g, relHeading) * 0.35 + 360) % 360;
+    }
+    // (ب) البوصلة: كما كانت (تُستخدم قبل المعايرة أو إذا الجايرو غير متوفر)
+    let h = null;
+    if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
+    else if (e.absolute && e.alpha != null) h = (360 - e.alpha) % 360;
+    if (h != null) gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.25 + 360) % 360);
+    render();
+  }
+  async function toggleTracking() {
+    if (tracking) {
+      removeEventListener('devicemotion', onMotion);
+      removeEventListener('deviceorientation', onOri, true);
+      removeEventListener('deviceorientationabsolute', onOri, true);
+      tracking = false; resetGyro(); trackBtn.classList.remove('on'); trackBtn.textContent = '📍'; trackBtn.title = 'تفعيل التتبع';
+      return;
+    }
+    try {
+      // آيفون/سفاري: نطلب الإذنين معاً وبشكل مباشر من ضغطة الزر (قبل أي await) وإلا يُرفض الطلب
+      const reqs = [];
+      if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') reqs.push(DeviceMotionEvent.requestPermission());
+      if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') reqs.push(DeviceOrientationEvent.requestPermission());
+      if (reqs.length) {
+        const res = await Promise.all(reqs.map(r => Promise.resolve(r).catch(() => 'denied')));
+        if (res.some(r => r !== 'granted')) { toast('تم رفض إذن الحركة والاتجاه — فعّله من إعدادات سفاري للموقع ثم أعد المحاولة'); return; }
+      }
+    } catch (e) { toast('تعذر طلب إذن المستشعرات (يلزم HTTPS)'); return; }
+    resetGyro(); // مرجع الجايرو يبدأ من جديد مع كل تشغيل للتتبع → لازم معايرة جديدة
+    addEventListener('devicemotion', onMotion);
+    addEventListener('deviceorientation', onOri, true);
+    addEventListener('deviceorientationabsolute', onOri, true);
+    tracking = true; trackBtn.classList.add('on'); trackBtn.textContent = '⏹'; trackBtn.title = 'إيقاف التتبع';
+    toast(pos ? 'ابدأ المشي' : 'امسح QR (📷) لتحديد موقعك أولاً');
+    setTimeout(() => { if (tracking && devHeading == null) toast('لا تصل قراءة البوصلة — تأكد من السماح بالحركة والاتجاه للمتصفح'); }, 3000);
+  }
+  // المعايرة: قف وواجه اتجاه المسار الأخضر (أو أعلى الخريطة إن لم يكن هناك مسار) ثم اضغط
+  // بعدها يتثبّت الاتجاه على الجايرو ولا تؤثر عليه البوصلة المغناطيسية حتى تعاير من جديد
+  function calibrate() {
+    if (devHeading == null && relHeading == null) { toast('فعّل التتبع أولاً'); return; }
+    const dir = routeDirection();
+    lockHeading(selectedBldg, dir == null ? 0 : dir);
+    render(); updateRoute();
+    const locked = relHeading != null;
+    toast(dir == null
+      ? 'تمت المعايرة على أن وجهك نحو أعلى الخريطة. للأفضل: حدّد قاعة وواجه اتجاه الخط الأخضر ثم أعد المعايرة'
+      : (locked ? 'تمت المعايرة وتثبيت الاتجاه ✓' : 'تمت معايرة مبنى ' + selectedBldg + ' (جهازك لا يدعم التثبيت بالجايرو، تعمل بالبوصلة)'));
+  }
+
+  /* ---------- واجهة ---------- */
+  function toast(msg) {
+    const t = document.createElement('div');
+    t.className = 'pdr-toast'; t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3500);
+  }
+  function buildUI() {
+    const st = document.createElement('style');
+    st.textContent =
+      '.pdr-bar{position:fixed;left:calc(6px + env(safe-area-inset-left,0px));top:50%;transform:translateY(-50%);z-index:115;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}' +
+      '.pdr-bar>*{pointer-events:auto}' +
+      '.pdr-bar button{width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;background:var(--panel-bg,#1e293b);border:1px solid var(--border-color,#334155);color:var(--text-main,#f1f5f9);border-radius:50%;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:.92;-webkit-tap-highlight-color:transparent}' +
+      '.pdr-bar button.on{background:var(--primary-green,#10b981);opacity:1}' +
+      '.pdr-bar span{font-size:10px;color:var(--text-sub,#94a3b8);background:var(--panel-bg,#1e293b);border-radius:8px;padding:2px 6px;opacity:.92}' +
+      '.pdr-toast{position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:400;background:var(--panel-bg,#1e293b);color:var(--text-main,#f1f5f9);border:1px solid var(--primary-green,#10b981);padding:8px 16px;border-radius:10px;font-size:12px;max-width:90vw;text-align:center}';
+    document.head.appendChild(st);
+    const bar = document.createElement('div');
+    bar.className = 'pdr-bar';
+    bar.innerHTML = '<button id="pdrTrack" title="تفعيل التتبع" aria-label="تفعيل التتبع">📍</button><button id="pdrScan" title="مسح QR" aria-label="مسح QR">📷</button><button id="pdrCal" title="معايرة الاتجاه" aria-label="معايرة الاتجاه">🧭</button>';
+    document.body.appendChild(bar);
+    trackBtn = bar.querySelector('#pdrTrack'); stepsEl = bar.querySelector('#pdrSteps');
+    trackBtn.onclick = toggleTracking;
+    bar.querySelector('#pdrScan').onclick = scanQr;
+    bar.querySelector('#pdrCal').onclick = calibrate;
+
+    markerEl = document.createElementNS(NS, 'g');
+    markerEl.setAttribute('display', 'none');
+    markerEl.id = 'pdrMarker'; // يستخدمه nav-mode.js لإخفاء المؤشر القديم أثناء التنقل
+    markerEl.innerHTML = '<circle r="22" fill="rgba(37,99,235,.35)" class="ping-ring"/><g id="pdrArrow"><polygon points="0,-22 9,-8 -9,-8" fill="#60a5fa"/></g><circle r="9" fill="#2563eb" stroke="#fff" stroke-width="3"/>';
+    document.getElementById('navigationSvg').appendChild(markerEl);
+    arrowEl = markerEl.querySelector('#pdrArrow');
+  }
+
+  /* ---------- ربط بدون تعديل الكود الأصلي ---------- */
+  const _render = window.renderBlueprint;
+  window.renderBlueprint = function () { _render.apply(this, arguments); render(); };
+
+  const _clear = window.clearNavigation;
+  window.clearNavigation = function () { dest = null; _clear.apply(this, arguments); };
+
+  const _hr = window.highlightAndRoute;
+  window.highlightAndRoute = function () {
+    _hr.apply(this, arguments);
+    const id = document.getElementById('roomDropdown').value;
+    const room = id && campusData[selectedBldg][selectedFloor].rooms.find(r => r.id === id);
+    if (room) { const q = lastPoint(room); dest = { x: q[0], y: q[1], label: room.label.replace('\n', ' ') }; updateRoute(); }
+    else dest = null;
+  };
+
+  buildUI();
+
+  // محاكاة بالكيبورد للتجربة على الكمبيوتر: ↑ خطوة، ←/→ تدوير 15°
+  addEventListener('keydown', e => {
+    if (!pos || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+    if (devHeading == null) gotHeading(offsetFor(posCtx.b));
+    if (e.key === 'ArrowUp') { onStep(); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      devHeading = (devHeading + (e.key === 'ArrowLeft' ? -15 : 15) + 360) % 360; render(); e.preventDefault();
+    }
+  });
+
+  addEventListener('load', () => {
+    const p = new URLSearchParams(location.search);
+    if ([...p.keys()].length) applyParams(p);
+  });
+
+  window.PDR = {
+    cfg: CFG, setPos, calibrate, applyParams, scan: scanQr, graph: () => cur(),
+    state: () => ({ pos, posCtx, dest, devHeading, relHeading, locked: relHeading != null && gyroOff[selectedBldg] != null, steps }),
+    // مضافة لوضع التنقل (nav-mode.js)
+    heading: mapHeading, matches: matchesFloor, routeDirection,
+    isTracking: () => tracking, toggleTracking
+  };
+})();
