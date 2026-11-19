@@ -10,22 +10,9 @@
     snapR: 12,            // نصف قطر البحث عن الممر
     minAlign: 0.35,       // أقل توافق بين اتجاه المشي واتجاه الممر
     stepMinMs: 320,       // أقل زمن بين خطوتين
-    stepThresh: 0.9,      // حساسية كشف الخطوة (م/ث²) — أقل = يلتقط المشي البطيء أيضاً
+    stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
-    stepWarmup: 2,        // عدد الخطوات المتتالية المنتظمة اللازمة قبل اعتبارها مشياً حقيقياً (يمنع حركة اليد العشوائية)
-    stepMaxGapMs: 1500,   // أكبر زمن بين خطوتين قبل اعتبار المشي متوقفاً
-    stepMaxAcc: 12,       // أي هزّة أقوى من هذا (م/ث²) تُعتبر رجّة وليست خطوة
-    stepMaxThr: 3.5,      // سقف عتبة كشف الخطوة (م/ث²): يمنع رجّة قوية واحدة (مثل الضغط على الشاشة) من رفع العتبة فوق قوة المشي الطبيعي
-    stepAmpRatio: 3,      // أقصى نسبة بين قوة قمتين متتاليتين قبل اعتبارها حركة عشوائية أو رجّة
-    maxRotRate: 320,      // دوران أسرع من هذا (°/ث) = تدوير الجوال باليد، لا تُحسب خطوات أثناءه
-    adaptiveStride: true, // طول الخطوة يتكيف مع سرعة المشي
-    refCadence: 1.8,      // الإيقاع المرجعي (خطوة/ث) الذي ينطبق عليه strideM
-    cadenceGain: 0.4,     // مقدار تأثير الإيقاع على طول الخطوة
-    stepResumeMs: 6000,   // إذا توقفت أقل من هذا الزمن ثم أكملت المشي، يُستأنف التتبع بعد خطوتين فقط (بدل ثلاث)
-    glideRatio: 0.8,      // مدة انزلاق المؤشر كنسبة من زمن الخطوة (<1 = يصل قبل الخطوة التالية فلا يتأخر)
-    warmRotRate: 150,     // قبل تأكيد المشي: أي دوران أسرع من هذا (°/ث) = حركة يد، لا تُحسب خطوات
-    maxLatRatio: 2,       // قبل تأكيد المشي: إذا كانت الحركة الجانبية أكبر بكثير من العمودية فهي تحريك يد لا مشي
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -34,16 +21,7 @@
   let tracking = false, devHeading = null, pendingH = null, steps = 0;
   let relHeading = null;   // اتجاه الجايرو (لا يتأثر بالمغناطيس) — مرجعه عشوائي لكنه ثابت أثناء التتبع
   const gyroOff = {};      // بعد المعايرة: فرق الجايرو عن اتجاه الخريطة لكل مبنى (في الذاكرة فقط، لا يُحفظ)
-  let lastHint = 0;
-  /* حالة كاشف الخطوات */
-  let gx = 0, gy = 0, gz = 9.8, gInit = false, lastMotionT = 0;      // تقدير الجاذبية
-  let sv = 0, d1 = 0, d2 = 0, t1 = 0, rotBlockUntil = 0;             // إشارة التسارع العمودي
-  let lastPeakT = 0, prevInt = 0, avgInt = 0, ampAvg = 0, streak = 0, walking = false;
-  let lastWalkT = 0, lastAvgInt = 0, resumeInt = 0, rotSm = 0, latSm = 0;   // استئناف سريع بعد توقف قصير + مؤشرات رفض حركة اليد
-  /* اتجاه الخطوة بعد المعايرة: يُلتقط لحظة الخطوة فقط ولا يتبع تدوير الجوال باليد */
-  let stepRel = null, hBuf = [];
-  /* الحركة السلسة: pos = الموقع المنطقي، dispPos = موضع رسم المؤشر أثناء الانزلاق */
-  let dispPos = null, anim = null, rafId = 0;
+  let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;
   let markerEl, arrowEl, stepsEl, trackBtn;
 
   /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */
@@ -59,22 +37,14 @@
   const offsetFor = b => offsets[b] != null ? offsets[b] : (CFG.buildingNorth[b] || 0);
   // بعد المعايرة: الاتجاه يعتمد على الجايرو فقط (مثبّت)، وقبلها يعتمد على البوصلة كما كان
   const mapHeadingFor = b => (relHeading != null && gyroOff[b] != null)
-    ? (((stepRel != null ? stepRel : relHeading) - gyroOff[b]) % 360 + 360) % 360
+    ? ((relHeading - gyroOff[b]) % 360 + 360) % 360
     : (((devHeading == null ? offsetFor(b) : devHeading) - offsetFor(b)) + 360) % 360;
   // تثبيت الاتجاه: h = اتجاه المستخدم الحقيقي على الخريطة الآن
   function lockHeading(b, h) {
     if (devHeading != null) setOffset(b, devHeading - h);          // احتياط إذا الجايرو غير متوفر
-    if (relHeading != null) { gyroOff[b] = (((relHeading - h) % 360) + 360) % 360; stepRel = relHeading; }
+    if (relHeading != null) gyroOff[b] = (((relHeading - h) % 360) + 360) % 360;
   }
-  function resetGyro() { relHeading = null; stepRel = null; hBuf = []; for (const k in gyroOff) delete gyroOff[k]; }
-  const isLocked = b => relHeading != null && gyroOff[b] != null;
-  // متوسط دائري لقراءات الجايرو في آخر ~400ms (يخفّف اهتزاز اليد لحظة الخطوة)
-  function latchHeading() {
-    const now = performance.now();
-    let sx = 0, sy = 0, n = 0;
-    for (const o of hBuf) if (now - o.t <= 400) { sx += Math.sin(o.h * Math.PI / 180); sy += Math.cos(o.h * Math.PI / 180); n++; }
-    stepRel = n ? (Math.atan2(sx, sy) * 180 / Math.PI + 360) % 360 : relHeading;
-  }
+  function resetGyro() { relHeading = null; for (const k in gyroOff) delete gyroOff[k]; }
   // اتجاه الجهاز الأمامي من alpha/beta/gamma (يعمل سواء الجوال مسطّح أو شبه عمودي)
   function gyroHeading(alpha, beta, gamma) {
     const r = Math.PI / 180, ca = Math.cos(alpha * r), sa = Math.sin(alpha * r);
@@ -198,46 +168,16 @@
     if (t - lastHint > 8000) { lastHint = t; toast(msg); }
   }
 
-  /* انزلاق سلس للمؤشر نحو الموقع الجديد: مدة الانزلاق = زمن الخطوة، فيتكيف مع سرعة المشي */
-  function glideTo(target, dur) {
-    if (!dispPos) { dispPos = { x: target.x, y: target.y }; render(); return; }
-    anim = { from: { x: dispPos.x, y: dispPos.y }, to: { x: target.x, y: target.y }, t0: performance.now(), dur: Math.max(150, Math.min(3000, dur)) };
-    if (!rafId) rafId = requestAnimationFrame(tickAnim);
-  }
-  function tickAnim(now) {
-    rafId = 0;
-    if (!anim) return;
-    const k = Math.max(0, Math.min(1, (now - anim.t0) / anim.dur));
-    dispPos = { x: anim.from.x + (anim.to.x - anim.from.x) * k, y: anim.from.y + (anim.to.y - anim.from.y) * k };
-    render();
-    if (k < 1) rafId = requestAnimationFrame(tickAnim); else anim = null;
-  }
-
-  // opts.n = عدد الخطوات المؤكدة، opts.interval = متوسط زمن الخطوة (ms) — بدونها (لوحة المفاتيح) خطوة واحدة عادية
-  function onStep(opts) {
-    opts = opts || {};
+  function onStep() {
     if (!pos || !posCtx) { hint('امسح QR (📷) لتحديد موقعك أولاً'); return; }
     if (devHeading == null && relHeading == null) { hint('بانتظار قراءة البوصلة… حرّك الجوال حركة رقم 8'); return; }
-    const n = opts.n || 1, interval = opts.interval || 0;
-    // بعد المعايرة: اتجاه الخطوة يُلتقط الآن فقط
-    if (isLocked(posCtx.b)) latchHeading();
-    // طول الخطوة يتكيف مع الإيقاع: بطيء = خطوة أقصر، سريع = خطوة أطول
-    let k = 1;
-    if (CFG.adaptiveStride && interval > 0) k = Math.max(0.75, Math.min(1.25, 1 + CFG.cadenceGain * (1000 / interval - CFG.refCadence)));
-    const stride = CFG.strideM * CFG.pxPerM * k;
+    steps++;
     // التتبع يستمر على دور/مبنى المستخدم حتى لو كان يتصفح خريطة غيره
-    const g = graphFor(posCtx.b, posCtx.f);
-    let moved = false;
-    for (let i = 0; i < n; i++) { steps++; if (move(stride, g, posCtx.b)) moved = true; }
+    const moved = move(CFG.strideM * CFG.pxPerM, graphFor(posCtx.b, posCtx.f), posCtx.b);
     if (matchesFloor()) {
-      if (moved) {
-        // انزلاق بمدة أقصر من زمن الخطوة → يصل المؤشر قبل الخطوة التالية ويتوقف فور توقفك
-        const dur = interval ? interval * Math.min(n, 2) * CFG.glideRatio : 300;
-        glideTo(pos, dur); updateRoute();
-      }
+      if (moved) updateRoute();
       render();
     } else {
-      dispPos = { x: pos.x, y: pos.y }; anim = null;
       hint('موقعك مسجّل في مبنى ' + posCtx.b + ' — ' + posCtx.f + '. إذا انتقلت لدور أو مبنى آخر امسح QR هناك لتحديث موقعك');
     }
     if (stepsEl) stepsEl.textContent = String(steps);
@@ -278,8 +218,7 @@
     if (!markerEl) return;
     if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }
     markerEl.setAttribute('display', 'block');
-    const dp = dispPos || pos;
-    markerEl.setAttribute('transform', 'translate(' + dp.x + ',' + dp.y + ')');
+    markerEl.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
     arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
   }
 
@@ -287,7 +226,6 @@
     const s = snap({ x, y }, graphFor(b, f));
     pos = s ? s.pt : { x, y };
     posCtx = { b, f };
-    dispPos = { x: pos.x, y: pos.y }; anim = null;
   }
 
   /* ---------- QR ---------- */
@@ -391,106 +329,21 @@
     devHeading = h;
     if (pendingH != null) { setOffset(pendingH.b, h - pendingH.h); pendingH = null; }
   }
-  /* كشف الخطوات: التسارع العمودي (بعد طرح الجاذبية) + قمم منتظمة الإيقاع.
-     حركة اليد العشوائية أو تدوير الجوال لا تُحسب خطوات: تُرفض القمم أثناء الدوران السريع،
-     ولا يُعتمد المشي إلا بعد عدة قمم متتالية بإيقاع متقارب. */
-  function resetStepper() {
-    gInit = false; lastMotionT = 0; sv = d1 = d2 = t1 = 0; rotBlockUntil = 0;
-    lastPeakT = 0; prevInt = 0; avgInt = 0; ampAvg = 0; streak = 0; walking = false;
-    lastWalkT = 0; lastAvgInt = 0; resumeInt = 0; rotSm = 0; latSm = 0;
-  }
-  function onPeak(t, amp) {
-    const gap = lastPeakT ? t - lastPeakT : Infinity;
-    if (gap > CFG.stepMaxGapMs) {                       // بداية مشي جديد (أو توقف طويل)
-      // توقف قصير بعد مشي مؤكد → نتذكر الإيقاع السابق لنستأنف بسرعة
-      resumeInt = (lastAvgInt && t - lastWalkT < CFG.stepResumeMs) ? lastAvgInt : 0;
-      lastPeakT = t; prevInt = 0; avgInt = 0; ampAvg = amp; streak = 1; walking = false;
-      if (CFG.stepWarmup <= 1) { walking = true; lastWalkT = t; onStep({ n: 1, interval: 0 }); }
-      return;
-    }
-    // أقل زمن بين خطوتين يتكيف مع الإيقاع الحالي (يمنع احتساب ارتداد الخطوة كخطوة ثانية)
-    // لكن إذا كانت القمة القصيرة قوية (≥75% من قوة المشي الحالية) فهي خطوة حقيقية أسرع (تسريع) لا ارتداد، فتُقبل
-    if (gap < CFG.stepMinMs) return;
-    if (walking && avgInt && gap < avgInt * 0.6 && !(ampAvg && amp >= ampAvg * 0.75)) return;
-    // رجّة مفاجئة أقوى بكثير من قوة المشي الحالية (ضغطة شاشة/ارتطام) → تُتجاهل ولا تُحسب خطوة
-    if (walking && ampAvg && amp > ampAvg * CFG.stepAmpRatio) return;
-    lastPeakT = t;
-    // قبل تأكيد المشي: قوة القمة يجب أن تتناسب مع سابقتها، وإلا نبدأ العدّ من جديد (حركة عشوائية)
-    if (!walking && ampAvg && (amp > ampAvg * CFG.stepAmpRatio || amp * CFG.stepAmpRatio < ampAvg)) {
-      ampAvg = amp; streak = 1; prevInt = 0; resumeInt = 0; return;
-    }
-    ampAvg = ampAvg ? ampAvg * 0.7 + amp * 0.3 : amp;    // يتكيف أسرع مع تغيّر قوة المشي (تسريع/تبطيء)
-    if (walking) {
-      // الإيقاع يتبع آخر خطوة بسرعة: إذا أسرعت تقصر المدة فوراً، وإذا أبطأت تطول
-      const gc = Math.max(avgInt * 0.5, Math.min(avgInt * 2, gap));
-      avgInt = avgInt * 0.4 + gc * 0.6;
-      lastWalkT = t; lastAvgInt = avgInt;
-      onStep({ n: 1, interval: avgInt });
-      return;
-    }
-    // استئناف سريع: مشيت قبل لحظات وتوقفت قليلاً، والفاصل الآن قريب من إيقاعك السابق → خطوتان تكفيان
-    if (resumeInt && streak === 1 && gap >= resumeInt * 0.55 && gap <= resumeInt * 1.8) {
-      walking = true; streak = 2; avgInt = (gap + resumeInt) / 2;
-      lastWalkT = t; lastAvgInt = avgInt;
-      onStep({ n: 2, interval: avgInt });
-      return;
-    }
-    if (prevInt && Math.abs(gap - prevInt) > 0.45 * prevInt) {   // إيقاع غير منتظم → نبدأ العدّ من جديد
-      streak = 1; prevInt = 0; resumeInt = 0; return;
-    }
-    streak++;
-    if (streak >= CFG.stepWarmup) {                      // مشي مؤكد: نحتسب الخطوات المؤجلة دفعة واحدة
-      walking = true;
-      avgInt = prevInt ? (prevInt + gap) / 2 : gap;
-      lastWalkT = t; lastAvgInt = avgInt;
-      onStep({ n: streak, interval: avgInt });
-    } else prevInt = gap;
-  }
   function onMotion(e) {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x == null) return;
-    const t = performance.now();
-    const rr = e.rotationRate;
-    if (rr && rr.alpha != null) {
-      const rot = Math.hypot(rr.alpha || 0, rr.beta || 0, rr.gamma || 0);
-      if (rot > CFG.maxRotRate) rotBlockUntil = t + 350;
-      rotSm = rotSm * 0.7 + rot * 0.3;
-    }
-    // تقدير الجاذبية بمرشّح بطيء، ثم نأخذ مركّبة التسارع على اتجاه الجاذبية (يعمل بأي وضعية للجوال)
-    const dt = lastMotionT ? Math.min(0.2, (t - lastMotionT) / 1000) : 0.016;
-    lastMotionT = t;
-    if (!gInit) { gx = a.x; gy = a.y; gz = a.z; gInit = true; }
-    const kg = Math.exp(-dt / 0.8);
-    gx = gx * kg + a.x * (1 - kg); gy = gy * kg + a.y * (1 - kg); gz = gz * kg + a.z * (1 - kg);
-    const gm = Math.hypot(gx, gy, gz) || 1;
-    const v = ((a.x - gx) * gx + (a.y - gy) * gy + (a.z - gz) * gz) / gm;
-    sv = sv * 0.5 + v * 0.5;
-    // الحركة الجانبية (غير العمودية): تحريك الجوال باليد غالباً جانبي، أما المشي فعمودي الغالب
-    const dx = a.x - gx, dy = a.y - gy, dz = a.z - gz;
-    latSm = latSm * 0.8 + Math.sqrt(Math.max(0, dx * dx + dy * dy + dz * dz - v * v)) * 0.2;
-    const d = sv;
-    // d1 = القيمة السابقة: قمة محلية فوق العتبة (تتكيف مع قوة المشي)
-    // العتبة تعود للحد الأدنى بعد أي توقف (لا تبقى عالية بسبب رجّة قديمة)، ولها سقف
-    const fresh = !lastPeakT || t - lastPeakT > CFG.stepMaxGapMs;
-    const thr = fresh ? CFG.stepThresh : Math.min(CFG.stepMaxThr, Math.max(CFG.stepThresh, ampAvg * 0.5));
-    if (d1 > thr && d1 >= d2 && d1 > d) {
-      // قبل تأكيد المشي نكون أشد صرامة مع حركة اليد (دوران متوسط أو حركة جانبية طاغية)
-      const handMove = !walking && (rotSm > CFG.warmRotRate || latSm > CFG.maxLatRatio * d1);
-      if (d1 <= CFG.stepMaxAcc && t1 >= rotBlockUntil && !handMove) onPeak(t1, d1);
-    }
-    d2 = d1; d1 = d; t1 = t;
+    const m = Math.hypot(a.x, a.y, a.z);
+    avg = avg * 0.9 + m * 0.1;
+    const d = m - avg, t = performance.now();
+    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { lastStepT = t; onStep(); }
+    d2 = d1; d1 = d;
   }
   function onOri(e) {
     const isAbs = e.type === 'deviceorientationabsolute' || e.absolute === true;
     // (أ) الجايرو: قراءة نسبية غير مغناطيسية → للتثبيت بعد المعايرة
     if (!isAbs && e.alpha != null && e.beta != null && e.gamma != null) {
       const g = gyroHeading(e.alpha, e.beta, e.gamma);
-      if (g != null) {
-        relHeading = relHeading == null ? g : (relHeading + angDiff(g, relHeading) * 0.35 + 360) % 360;
-        const now = performance.now();
-        hBuf.push({ t: now, h: relHeading });
-        while (hBuf.length && now - hBuf[0].t > 1000) hBuf.shift();
-      }
+      if (g != null) relHeading = relHeading == null ? g : (relHeading + angDiff(g, relHeading) * 0.35 + 360) % 360;
     }
     // (ب) البوصلة: كما كانت (تُستخدم قبل المعايرة أو إذا الجايرو غير متوفر)
     let h = null;
@@ -504,7 +357,7 @@
       removeEventListener('devicemotion', onMotion);
       removeEventListener('deviceorientation', onOri, true);
       removeEventListener('deviceorientationabsolute', onOri, true);
-      tracking = false; resetGyro(); resetStepper(); trackBtn.classList.remove('on'); trackBtn.textContent = '📍'; trackBtn.title = 'تفعيل التتبع';
+      tracking = false; resetGyro(); trackBtn.classList.remove('on'); trackBtn.textContent = '📍'; trackBtn.title = 'تفعيل التتبع';
       return;
     }
     try {
@@ -518,7 +371,6 @@
       }
     } catch (e) { toast('تعذر طلب إذن المستشعرات (يلزم HTTPS)'); return; }
     resetGyro(); // مرجع الجايرو يبدأ من جديد مع كل تشغيل للتتبع → لازم معايرة جديدة
-    resetStepper();
     addEventListener('devicemotion', onMotion);
     addEventListener('deviceorientation', onOri, true);
     addEventListener('deviceorientationabsolute', onOri, true);
