@@ -10,10 +10,10 @@
     snapR: 12,            // نصف قطر البحث عن الممر
     minAlign: 0.35,       // أقل توافق بين اتجاه المشي واتجاه الممر
     stepMinMs: 320,       // أقل زمن بين خطوتين
-    stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
+    stepThresh: 0.9,      // حساسية كشف الخطوة (م/ث²) — أقل = يلتقط المشي البطيء أيضاً
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
-    stepWarmup: 3,        // عدد الخطوات المتتالية المنتظمة اللازمة قبل اعتبارها مشياً حقيقياً (يمنع حركة اليد العشوائية)
+    stepWarmup: 2,        // عدد الخطوات المتتالية المنتظمة اللازمة قبل اعتبارها مشياً حقيقياً (يمنع حركة اليد العشوائية)
     stepMaxGapMs: 1500,   // أكبر زمن بين خطوتين قبل اعتبار المشي متوقفاً
     stepMaxAcc: 12,       // أي هزّة أقوى من هذا (م/ث²) تُعتبر رجّة وليست خطوة
     stepMaxThr: 3.5,      // سقف عتبة كشف الخطوة (م/ث²): يمنع رجّة قوية واحدة (مثل الضغط على الشاشة) من رفع العتبة فوق قوة المشي الطبيعي
@@ -21,7 +21,11 @@
     maxRotRate: 320,      // دوران أسرع من هذا (°/ث) = تدوير الجوال باليد، لا تُحسب خطوات أثناءه
     adaptiveStride: true, // طول الخطوة يتكيف مع سرعة المشي
     refCadence: 1.8,      // الإيقاع المرجعي (خطوة/ث) الذي ينطبق عليه strideM
-    cadenceGain: 0.35,    // مقدار تأثير الإيقاع على طول الخطوة
+    cadenceGain: 0.4,     // مقدار تأثير الإيقاع على طول الخطوة
+    stepResumeMs: 6000,   // إذا توقفت أقل من هذا الزمن ثم أكملت المشي، يُستأنف التتبع بعد خطوتين فقط (بدل ثلاث)
+    glideRatio: 0.8,      // مدة انزلاق المؤشر كنسبة من زمن الخطوة (<1 = يصل قبل الخطوة التالية فلا يتأخر)
+    warmRotRate: 150,     // قبل تأكيد المشي: أي دوران أسرع من هذا (°/ث) = حركة يد، لا تُحسب خطوات
+    maxLatRatio: 2,       // قبل تأكيد المشي: إذا كانت الحركة الجانبية أكبر بكثير من العمودية فهي تحريك يد لا مشي
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -35,6 +39,7 @@
   let gx = 0, gy = 0, gz = 9.8, gInit = false, lastMotionT = 0;      // تقدير الجاذبية
   let sv = 0, d1 = 0, d2 = 0, t1 = 0, rotBlockUntil = 0;             // إشارة التسارع العمودي
   let lastPeakT = 0, prevInt = 0, avgInt = 0, ampAvg = 0, streak = 0, walking = false;
+  let lastWalkT = 0, lastAvgInt = 0, resumeInt = 0, rotSm = 0, latSm = 0;   // استئناف سريع بعد توقف قصير + مؤشرات رفض حركة اليد
   /* اتجاه الخطوة بعد المعايرة: يُلتقط لحظة الخطوة فقط ولا يتبع تدوير الجوال باليد */
   let stepRel = null, hBuf = [];
   /* الحركة السلسة: pos = الموقع المنطقي، dispPos = موضع رسم المؤشر أثناء الانزلاق */
@@ -225,7 +230,11 @@
     let moved = false;
     for (let i = 0; i < n; i++) { steps++; if (move(stride, g, posCtx.b)) moved = true; }
     if (matchesFloor()) {
-      if (moved) { glideTo(pos, interval ? interval * n : 300); updateRoute(); }
+      if (moved) {
+        // انزلاق بمدة أقصر من زمن الخطوة → يصل المؤشر قبل الخطوة التالية ويتوقف فور توقفك
+        const dur = interval ? interval * Math.min(n, 2) * CFG.glideRatio : 300;
+        glideTo(pos, dur); updateRoute();
+      }
       render();
     } else {
       dispPos = { x: pos.x, y: pos.y }; anim = null;
@@ -388,37 +397,52 @@
   function resetStepper() {
     gInit = false; lastMotionT = 0; sv = d1 = d2 = t1 = 0; rotBlockUntil = 0;
     lastPeakT = 0; prevInt = 0; avgInt = 0; ampAvg = 0; streak = 0; walking = false;
+    lastWalkT = 0; lastAvgInt = 0; resumeInt = 0; rotSm = 0; latSm = 0;
   }
   function onPeak(t, amp) {
     const gap = lastPeakT ? t - lastPeakT : Infinity;
     if (gap > CFG.stepMaxGapMs) {                       // بداية مشي جديد (أو توقف طويل)
+      // توقف قصير بعد مشي مؤكد → نتذكر الإيقاع السابق لنستأنف بسرعة
+      resumeInt = (lastAvgInt && t - lastWalkT < CFG.stepResumeMs) ? lastAvgInt : 0;
       lastPeakT = t; prevInt = 0; avgInt = 0; ampAvg = amp; streak = 1; walking = false;
-      if (CFG.stepWarmup <= 1) { walking = true; onStep({ n: 1, interval: 0 }); }
+      if (CFG.stepWarmup <= 1) { walking = true; lastWalkT = t; onStep({ n: 1, interval: 0 }); }
       return;
     }
     // أقل زمن بين خطوتين يتكيف مع الإيقاع الحالي (يمنع احتساب ارتداد الخطوة كخطوة ثانية)
-    const minInt = walking && avgInt ? Math.max(CFG.stepMinMs, avgInt * 0.6) : CFG.stepMinMs;
-    if (gap < minInt) return;
+    // لكن إذا كانت القمة القصيرة قوية (≥75% من قوة المشي الحالية) فهي خطوة حقيقية أسرع (تسريع) لا ارتداد، فتُقبل
+    if (gap < CFG.stepMinMs) return;
+    if (walking && avgInt && gap < avgInt * 0.6 && !(ampAvg && amp >= ampAvg * 0.75)) return;
     // رجّة مفاجئة أقوى بكثير من قوة المشي الحالية (ضغطة شاشة/ارتطام) → تُتجاهل ولا تُحسب خطوة
     if (walking && ampAvg && amp > ampAvg * CFG.stepAmpRatio) return;
     lastPeakT = t;
     // قبل تأكيد المشي: قوة القمة يجب أن تتناسب مع سابقتها، وإلا نبدأ العدّ من جديد (حركة عشوائية)
     if (!walking && ampAvg && (amp > ampAvg * CFG.stepAmpRatio || amp * CFG.stepAmpRatio < ampAvg)) {
-      ampAvg = amp; streak = 1; prevInt = 0; return;
+      ampAvg = amp; streak = 1; prevInt = 0; resumeInt = 0; return;
     }
-    ampAvg = ampAvg ? ampAvg * 0.8 + amp * 0.2 : amp;
+    ampAvg = ampAvg ? ampAvg * 0.7 + amp * 0.3 : amp;    // يتكيف أسرع مع تغيّر قوة المشي (تسريع/تبطيء)
     if (walking) {
-      avgInt = avgInt * 0.7 + gap * 0.3;
+      // الإيقاع يتبع آخر خطوة بسرعة: إذا أسرعت تقصر المدة فوراً، وإذا أبطأت تطول
+      const gc = Math.max(avgInt * 0.5, Math.min(avgInt * 2, gap));
+      avgInt = avgInt * 0.4 + gc * 0.6;
+      lastWalkT = t; lastAvgInt = avgInt;
       onStep({ n: 1, interval: avgInt });
       return;
     }
+    // استئناف سريع: مشيت قبل لحظات وتوقفت قليلاً، والفاصل الآن قريب من إيقاعك السابق → خطوتان تكفيان
+    if (resumeInt && streak === 1 && gap >= resumeInt * 0.55 && gap <= resumeInt * 1.8) {
+      walking = true; streak = 2; avgInt = (gap + resumeInt) / 2;
+      lastWalkT = t; lastAvgInt = avgInt;
+      onStep({ n: 2, interval: avgInt });
+      return;
+    }
     if (prevInt && Math.abs(gap - prevInt) > 0.45 * prevInt) {   // إيقاع غير منتظم → نبدأ العدّ من جديد
-      streak = 1; prevInt = 0; return;
+      streak = 1; prevInt = 0; resumeInt = 0; return;
     }
     streak++;
     if (streak >= CFG.stepWarmup) {                      // مشي مؤكد: نحتسب الخطوات المؤجلة دفعة واحدة
       walking = true;
       avgInt = prevInt ? (prevInt + gap) / 2 : gap;
+      lastWalkT = t; lastAvgInt = avgInt;
       onStep({ n: streak, interval: avgInt });
     } else prevInt = gap;
   }
@@ -427,7 +451,11 @@
     if (!a || a.x == null) return;
     const t = performance.now();
     const rr = e.rotationRate;
-    if (rr && rr.alpha != null && Math.hypot(rr.alpha || 0, rr.beta || 0, rr.gamma || 0) > CFG.maxRotRate) rotBlockUntil = t + 350;
+    if (rr && rr.alpha != null) {
+      const rot = Math.hypot(rr.alpha || 0, rr.beta || 0, rr.gamma || 0);
+      if (rot > CFG.maxRotRate) rotBlockUntil = t + 350;
+      rotSm = rotSm * 0.7 + rot * 0.3;
+    }
     // تقدير الجاذبية بمرشّح بطيء، ثم نأخذ مركّبة التسارع على اتجاه الجاذبية (يعمل بأي وضعية للجوال)
     const dt = lastMotionT ? Math.min(0.2, (t - lastMotionT) / 1000) : 0.016;
     lastMotionT = t;
@@ -437,13 +465,18 @@
     const gm = Math.hypot(gx, gy, gz) || 1;
     const v = ((a.x - gx) * gx + (a.y - gy) * gy + (a.z - gz) * gz) / gm;
     sv = sv * 0.5 + v * 0.5;
+    // الحركة الجانبية (غير العمودية): تحريك الجوال باليد غالباً جانبي، أما المشي فعمودي الغالب
+    const dx = a.x - gx, dy = a.y - gy, dz = a.z - gz;
+    latSm = latSm * 0.8 + Math.sqrt(Math.max(0, dx * dx + dy * dy + dz * dz - v * v)) * 0.2;
     const d = sv;
     // d1 = القيمة السابقة: قمة محلية فوق العتبة (تتكيف مع قوة المشي)
     // العتبة تعود للحد الأدنى بعد أي توقف (لا تبقى عالية بسبب رجّة قديمة)، ولها سقف
     const fresh = !lastPeakT || t - lastPeakT > CFG.stepMaxGapMs;
     const thr = fresh ? CFG.stepThresh : Math.min(CFG.stepMaxThr, Math.max(CFG.stepThresh, ampAvg * 0.5));
     if (d1 > thr && d1 >= d2 && d1 > d) {
-      if (d1 <= CFG.stepMaxAcc && t1 >= rotBlockUntil) onPeak(t1, d1);
+      // قبل تأكيد المشي نكون أشد صرامة مع حركة اليد (دوران متوسط أو حركة جانبية طاغية)
+      const handMove = !walking && (rotSm > CFG.warmRotRate || latSm > CFG.maxLatRatio * d1);
+      if (d1 <= CFG.stepMaxAcc && t1 >= rotBlockUntil && !handMove) onPeak(t1, d1);
     }
     d2 = d1; d1 = d; t1 = t;
   }
