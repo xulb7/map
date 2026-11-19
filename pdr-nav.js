@@ -19,6 +19,8 @@
 
   let pos = null, posCtx = null, dest = null;
   let tracking = false, devHeading = null, pendingH = null, steps = 0;
+  let relHeading = null;   // اتجاه الجايرو (لا يتأثر بالمغناطيس) — مرجعه عشوائي لكنه ثابت أثناء التتبع
+  const gyroOff = {};      // بعد المعايرة: فرق الجايرو عن اتجاه الخريطة لكل مبنى (في الذاكرة فقط، لا يُحفظ)
   let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;
   let markerEl, arrowEl, stepsEl, trackBtn;
 
@@ -33,7 +35,25 @@
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const angDiff = (a, b) => ((a - b + 540) % 360) - 180;
   const offsetFor = b => offsets[b] != null ? offsets[b] : (CFG.buildingNorth[b] || 0);
-  const mapHeadingFor = b => (((devHeading == null ? offsetFor(b) : devHeading) - offsetFor(b)) + 360) % 360;
+  // بعد المعايرة: الاتجاه يعتمد على الجايرو فقط (مثبّت)، وقبلها يعتمد على البوصلة كما كان
+  const mapHeadingFor = b => (relHeading != null && gyroOff[b] != null)
+    ? ((relHeading - gyroOff[b]) % 360 + 360) % 360
+    : (((devHeading == null ? offsetFor(b) : devHeading) - offsetFor(b)) + 360) % 360;
+  // تثبيت الاتجاه: h = اتجاه المستخدم الحقيقي على الخريطة الآن
+  function lockHeading(b, h) {
+    if (devHeading != null) setOffset(b, devHeading - h);          // احتياط إذا الجايرو غير متوفر
+    if (relHeading != null) gyroOff[b] = (((relHeading - h) % 360) + 360) % 360;
+  }
+  function resetGyro() { relHeading = null; for (const k in gyroOff) delete gyroOff[k]; }
+  // اتجاه الجهاز الأمامي من alpha/beta/gamma (يعمل سواء الجوال مسطّح أو شبه عمودي)
+  function gyroHeading(alpha, beta, gamma) {
+    const r = Math.PI / 180, ca = Math.cos(alpha * r), sa = Math.sin(alpha * r);
+    const cb = Math.cos(beta * r), sb = Math.sin(beta * r), cg = Math.cos(gamma * r), sg = Math.sin(gamma * r);
+    const fx = (-sa * cb) + (-ca * sg - sa * sb * cg);   // أعلى الجهاز + ظهر الجهاز
+    const fy = (ca * cb) + (-sa * sg + ca * sb * cg);
+    if (Math.hypot(fx, fy) < 1e-6) return null;
+    return (Math.atan2(fx, fy) * 180 / Math.PI + 360) % 360;
+  }
   const mapHeading = () => mapHeadingFor(selectedBldg);
   const matchesFloor = () => pos && posCtx && posCtx.b === selectedBldg && posCtx.f === selectedFloor;
 
@@ -150,7 +170,7 @@
 
   function onStep() {
     if (!pos || !posCtx) { hint('امسح QR (📷) لتحديد موقعك أولاً'); return; }
-    if (devHeading == null) { hint('بانتظار قراءة البوصلة… حرّك الجوال حركة رقم 8'); return; }
+    if (devHeading == null && relHeading == null) { hint('بانتظار قراءة البوصلة… حرّك الجوال حركة رقم 8'); return; }
     steps++;
     // التتبع يستمر على دور/مبنى المستخدم حتى لو كان يتصفح خريطة غيره
     const moved = move(CFG.strideM * CFG.pxPerM, graphFor(posCtx.b, posCtx.f), posCtx.b);
@@ -235,7 +255,7 @@
     if (hasStart) {
       setPos(x, y, b, f);
       const h = parseFloat(p.get('h'));
-      if (!isNaN(h)) { if (devHeading != null) setOffset(b, devHeading - h); else pendingH = { b, h }; }
+      if (!isNaN(h)) { lockHeading(b, h); if (devHeading == null) pendingH = { b, h }; }
       toast('تم تحديد موقعك');
     }
     if (rr && rr.b === selectedBldg && rr.f === selectedFloor) {
@@ -319,11 +339,17 @@
     d2 = d1; d1 = d;
   }
   function onOri(e) {
+    const isAbs = e.type === 'deviceorientationabsolute' || e.absolute === true;
+    // (أ) الجايرو: قراءة نسبية غير مغناطيسية → للتثبيت بعد المعايرة
+    if (!isAbs && e.alpha != null && e.beta != null && e.gamma != null) {
+      const g = gyroHeading(e.alpha, e.beta, e.gamma);
+      if (g != null) relHeading = relHeading == null ? g : (relHeading + angDiff(g, relHeading) * 0.35 + 360) % 360;
+    }
+    // (ب) البوصلة: كما كانت (تُستخدم قبل المعايرة أو إذا الجايرو غير متوفر)
     let h = null;
     if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
     else if (e.absolute && e.alpha != null) h = (360 - e.alpha) % 360;
-    if (h == null) return;
-    gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.25 + 360) % 360);
+    if (h != null) gotHeading(devHeading == null ? h : (devHeading + angDiff(h, devHeading) * 0.25 + 360) % 360);
     render();
   }
   async function toggleTracking() {
@@ -331,7 +357,7 @@
       removeEventListener('devicemotion', onMotion);
       removeEventListener('deviceorientation', onOri, true);
       removeEventListener('deviceorientationabsolute', onOri, true);
-      tracking = false; trackBtn.classList.remove('on'); trackBtn.textContent = '📍'; trackBtn.title = 'تفعيل التتبع';
+      tracking = false; resetGyro(); trackBtn.classList.remove('on'); trackBtn.textContent = '📍'; trackBtn.title = 'تفعيل التتبع';
       return;
     }
     try {
@@ -344,6 +370,7 @@
         if (res.some(r => r !== 'granted')) { toast('تم رفض إذن الحركة والاتجاه — فعّله من إعدادات سفاري للموقع ثم أعد المحاولة'); return; }
       }
     } catch (e) { toast('تعذر طلب إذن المستشعرات (يلزم HTTPS)'); return; }
+    resetGyro(); // مرجع الجايرو يبدأ من جديد مع كل تشغيل للتتبع → لازم معايرة جديدة
     addEventListener('devicemotion', onMotion);
     addEventListener('deviceorientation', onOri, true);
     addEventListener('deviceorientationabsolute', onOri, true);
@@ -352,14 +379,16 @@
     setTimeout(() => { if (tracking && devHeading == null) toast('لا تصل قراءة البوصلة — تأكد من السماح بالحركة والاتجاه للمتصفح'); }, 3000);
   }
   // المعايرة: قف وواجه اتجاه المسار الأخضر (أو أعلى الخريطة إن لم يكن هناك مسار) ثم اضغط
+  // بعدها يتثبّت الاتجاه على الجايرو ولا تؤثر عليه البوصلة المغناطيسية حتى تعاير من جديد
   function calibrate() {
-    if (devHeading == null) { toast('فعّل التتبع أولاً'); return; }
+    if (devHeading == null && relHeading == null) { toast('فعّل التتبع أولاً'); return; }
     const dir = routeDirection();
-    setOffset(selectedBldg, devHeading - (dir == null ? 0 : dir));
+    lockHeading(selectedBldg, dir == null ? 0 : dir);
     render(); updateRoute();
+    const locked = relHeading != null;
     toast(dir == null
       ? 'تمت المعايرة على أن وجهك نحو أعلى الخريطة. للأفضل: حدّد قاعة وواجه اتجاه الخط الأخضر ثم أعد المعايرة'
-      : 'تمت معايرة مبنى ' + selectedBldg + ' على اتجاه المسار الأخضر');
+      : (locked ? 'تمت المعايرة وتثبيت الاتجاه ✓' : 'تمت معايرة مبنى ' + selectedBldg + ' (جهازك لا يدعم التثبيت بالجايرو، تعمل بالبوصلة)'));
   }
 
   /* ---------- واجهة ---------- */
@@ -431,7 +460,7 @@
 
   window.PDR = {
     cfg: CFG, setPos, calibrate, applyParams, scan: scanQr, graph: () => cur(),
-    state: () => ({ pos, posCtx, dest, devHeading, steps }),
+    state: () => ({ pos, posCtx, dest, devHeading, relHeading, locked: relHeading != null && gyroOff[selectedBldg] != null, steps }),
     // مضافة لوضع التنقل (nav-mode.js)
     heading: mapHeading, matches: matchesFloor, routeDirection,
     isTracking: () => tracking, toggleTracking
