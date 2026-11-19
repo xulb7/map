@@ -13,6 +13,8 @@
     stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
+    gyroSmooth: 0.8,      // سرعة استجابة الجايرو (1 = فوري، أقل = أنعم وأبطأ)
+    adaptStride: true,    // طول الخطوة يتبع سرعة المشي (أسرع = خطوة أطول قليلاً)
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -23,6 +25,7 @@
   const gyroOff = {};      // بعد المعايرة: فرق الجايرو عن اتجاه الخريطة لكل مبنى (في الذاكرة فقط، لا يُحفظ)
   let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;
   let markerEl, arrowEl, stepsEl, trackBtn;
+  let disp = null, animRaf = 0, animT = 0; // موضع العرض (حركة ناعمة نحو pos)
 
   /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */
   const store = {
@@ -146,17 +149,23 @@
   function move(stride, g, b) {
     const th = mapHeadingFor(b) * Math.PI / 180, h = { x: Math.sin(th), y: -Math.cos(th) };
     let best = null;
-    for (const e of g.edges) {
-      const q = proj(pos, e.a, e.b);
-      if (q.d > CFG.snapR) continue;
-      const ux = (e.b.x - e.a.x) / e.w, uy = (e.b.y - e.a.y) / e.w;
-      for (const sg of [1, -1]) {
-        if (sg * (ux * h.x + uy * h.y) < CFG.minAlign) continue;
-        const c = proj({ x: q.pt.x + sg * ux * stride, y: q.pt.y + sg * uy * stride }, e.a, e.b);
-        if (dist(c.pt, pos) > stride * 1.5) continue; // لا نقفز أكثر من خطوة واحدة
-        const gain = (c.pt.x - pos.x) * h.x + (c.pt.y - pos.y) * h.y;
-        if (!best || gain > best.gain) best = { gain, pt: c.pt };
+    const locked = relHeading != null && gyroOff[b] != null;
+    // بعد التثبيت: لو ما لقينا ممر موافق نعيد بمحاذاة أوسع حتى ما تضيع خطوات المشي
+    for (const ma of locked ? [CFG.minAlign, CFG.minAlign * 0.5] : [CFG.minAlign]) {
+      for (const e of g.edges) {
+        const q = proj(pos, e.a, e.b);
+        if (q.d > CFG.snapR) continue;
+        const ux = (e.b.x - e.a.x) / e.w, uy = (e.b.y - e.a.y) / e.w;
+        for (const sg of [1, -1]) {
+          if (sg * (ux * h.x + uy * h.y) < ma) continue;
+          const c = proj({ x: q.pt.x + sg * ux * stride, y: q.pt.y + sg * uy * stride }, e.a, e.b);
+          if (dist(c.pt, pos) > stride * 1.5) continue; // لا نقفز أكثر من خطوة واحدة
+          const gain = (c.pt.x - pos.x) * h.x + (c.pt.y - pos.y) * h.y;
+          if (!best || gain > best.gain) best = { gain, pt: c.pt };
+        }
       }
+      if (best && best.gain >= stride * 0.15) break;
+      best = null;
     }
     if (!best || best.gain < stride * 0.15) return false; // جدار أو نهاية ممر
     pos = best.pt;
@@ -168,12 +177,15 @@
     if (t - lastHint > 8000) { lastHint = t; toast(msg); }
   }
 
-  function onStep() {
+  function onStep(dt) {
     if (!pos || !posCtx) { hint('امسح QR (📷) لتحديد موقعك أولاً'); return; }
     if (devHeading == null && relHeading == null) { hint('بانتظار قراءة البوصلة… حرّك الجوال حركة رقم 8'); return; }
     steps++;
     // التتبع يستمر على دور/مبنى المستخدم حتى لو كان يتصفح خريطة غيره
-    const moved = move(CFG.strideM * CFG.pxPerM, graphFor(posCtx.b, posCtx.f), posCtx.b);
+    // سرعة المشي: خطوات أسرع (فاصل أقصر) → خطوة أطول قليلاً، وأبطأ → أقصر (حدود 0.85–1.25)
+    let k = 1;
+    if (CFG.adaptStride && dt > 0 && dt < 1500) k = Math.max(0.85, Math.min(1.25, 1 + (500 - dt) / 1000));
+    const moved = move(CFG.strideM * CFG.pxPerM * k, graphFor(posCtx.b, posCtx.f), posCtx.b);
     if (matchesFloor()) {
       if (moved) updateRoute();
       render();
@@ -218,14 +230,28 @@
     if (!markerEl) return;
     if (!matchesFloor()) { markerEl.setAttribute('display', 'none'); return; }
     markerEl.setAttribute('display', 'block');
-    markerEl.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
+    if (!disp || dist(disp, pos) > CFG.strideM * CFG.pxPerM * 4) disp = { x: pos.x, y: pos.y }; // قفزة (QR/تغيير موقع) → فوري
+    markerEl.setAttribute('transform', 'translate(' + disp.x + ',' + disp.y + ')');
     arrowEl.setAttribute('transform', 'rotate(' + mapHeading() + ')');
+    if (!animRaf && dist(disp, pos) > 0.3) { animT = performance.now(); animRaf = requestAnimationFrame(animate); }
+  }
+  // حركة ناعمة سريعة: النقطة تلحق موضع الخطوة خلال ~0.15 ث فتتبع سرعة المشي بدون تأخير
+  function animate(now) {
+    animRaf = 0;
+    if (!pos || !disp || !matchesFloor()) return;
+    const dt = Math.min(64, now - animT); animT = now;
+    const a = 1 - Math.exp(-dt / 60);
+    disp.x += (pos.x - disp.x) * a; disp.y += (pos.y - disp.y) * a;
+    if (dist(disp, pos) < 0.3) disp = { x: pos.x, y: pos.y };
+    markerEl.setAttribute('transform', 'translate(' + disp.x + ',' + disp.y + ')');
+    if (dist(disp, pos) > 0.3) animRaf = requestAnimationFrame(animate);
   }
 
   function setPos(x, y, b, f) {
     const s = snap({ x, y }, graphFor(b, f));
     pos = s ? s.pt : { x, y };
     posCtx = { b, f };
+    disp = null;
   }
 
   /* ---------- QR ---------- */
@@ -335,7 +361,7 @@
     const m = Math.hypot(a.x, a.y, a.z);
     avg = avg * 0.9 + m * 0.1;
     const d = m - avg, t = performance.now();
-    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { lastStepT = t; onStep(); }
+    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { const dt = t - lastStepT; lastStepT = t; onStep(dt); }
     d2 = d1; d1 = d;
   }
   function onOri(e) {
@@ -343,7 +369,7 @@
     // (أ) الجايرو: قراءة نسبية غير مغناطيسية → للتثبيت بعد المعايرة
     if (!isAbs && e.alpha != null && e.beta != null && e.gamma != null) {
       const g = gyroHeading(e.alpha, e.beta, e.gamma);
-      if (g != null) relHeading = relHeading == null ? g : (relHeading + angDiff(g, relHeading) * 0.35 + 360) % 360;
+      if (g != null) relHeading = relHeading == null ? g : (relHeading + angDiff(g, relHeading) * CFG.gyroSmooth + 360) % 360;
     }
     // (ب) البوصلة: كما كانت (تُستخدم قبل المعايرة أو إذا الجايرو غير متوفر)
     let h = null;
