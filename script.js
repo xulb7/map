@@ -97,7 +97,7 @@ const campusData = {
         { id: "A-F-11", label: "A-F-11", x: 247, y: 344, w: 75, h: 51, routePoints: "220,492 220,369 247,369" },
         { id: "A-F-13", label: "A-F-13\n(العميدة)", x: 516, y: 381, w: 118, h: 90, type: "blue-bg", routePoints: "220,492 571,492 571,471" },
         { id: "A-F-14", label: "A-F-14", x: 362, y: 300, w: 158, h: 62, routePoints: "220,492 335,415 342,404 342,329 362,329" },
-        { id: "A-F-17", label: "A-F-17", x: 248, y: 272, w: 73, h: 68, routePoints: "220,492 220,306 248,306" }
+        { id: "A-F-16", label: "A-F-16", x: 248, y: 272, w: 73, h: 68, routePoints: "220,492 220,306 248,306" }
       ]
     }
   },
@@ -481,6 +481,24 @@ function renderFloorsMenu() {
 // ===== أسماء القاعات (تُعرض مع الرمز، ولا تغيّر الرمز ولا الحجم) =====
 // المفتاح هو رمز القاعة؛ الأصفار البادئة لا تهم (A-G-05 = A-G-5)
 const roomNamesRaw = {
+  "B-G-5": "الصحة والسلامة",
+  "B-G-6": "جلسة",
+  "B-G-4": "قاعة تدريبية",
+  "B-G-3": "قاعة تدريبية",
+  "B-G-13": "قاعة تدريبية",
+  "B-F-6": "قاعة تدريبية",
+  "B-F-5": "قاعة تدريبية",
+  "B-F-14": "قاعة تدريبية",
+  "B-F-12": "قاعة تدريبية",
+  "B-S-10": "مصلى",
+  "B-S-6": "قاعة تدريبية",
+  "B-S-5": "قاعة تدريبية",
+  "B-S-12": "قاعة تدريبية",
+  "A-G-8": "قسم تقنية المعلومات",
+  "A-F-10": "السكرتارية",
+  "A-F-1": "معمل حاسب آلي",
+  "A-G-11": "دورة مياه",
+  "A-G-10": "مصلى",
   "B-S-04": "رئيسة قسم التقنية الإدارية",
   "B-S-02": "معمل حاسب آلي",
   "B-S-03": "مكتب أعضاء هيئة التدريب",
@@ -518,8 +536,7 @@ const roomNamesRaw = {
   "A-F-05": "مكتب أعضاء هيئة التدريب",
   "A-F-07": "رئيسة قسم الوسائط المتعددة + مكتب التصوير",
   "A-F-09": "معمل حاسب آلي",
-  "A-F-16-3": "وكيلة التدريب",
-  "A-F-16": "الشؤون المالية والإدارية",
+  "A-F-16": "وكيلة التدريب",
   "A-F-06": "وكيلة الجودة",
   "A-F-14": "غرفة الاجتماعات",
   "A-F-13": "مكتب العميدة",
@@ -542,10 +559,10 @@ function roomCode(room) {
   return room.label.split('\n')[0];
 }
 
-// النص الكامل للقائمة وشريط التوجيه: الرمز - الاسم
+// النص الكامل للقائمة وشريط التوجيه: الرمز (الاسم)
 function roomFullText(room) {
   const n = roomName(room);
-  return n ? `${roomCode(room)} - ${n}` : room.label.replace('\n', ' ');
+  return n ? `${roomCode(room)} (${n})` : room.label.replace('\n', ' ');
 }
 
 // يصغّر خط الاسم تلقائياً حتى يناسب القاعة بدون تغيير حجمها
@@ -583,7 +600,7 @@ function renderBlueprint() {
     if (rName) {
       const nameEl = document.createElement('span');
       nameEl.className = 'room-name';
-      nameEl.innerText = rName;
+      nameEl.innerText = `(${rName})`;
       node.appendChild(nameEl);
     }
 
@@ -693,32 +710,19 @@ function testQrScan(b, fl, rm) {
 // لإضافة اسم ناقص: أضيفي سطر { name: "أ. الاسم", email: "..." } داخل people للمكتب المناسب (الإيميل اختياري)
 const trainersData = [
   {
-    title: "مكتب أعضاء هيئة التدريب · دراسات عامة",
-    bldg: "B", floor: "الدور الأول", roomId: "B-F-03",
-    people: [
-      { name: "أ. خلود العتيبي", email: "kholouda@tvtc.gov.sa" },
-      { name: "أ. روان الجبر", email: "r.aljabr@tvtc.gov.sa" },
-      { name: "أ. طرفه الحميدي", email: "t.alhomaidi@tvtc.gov.sa" },
-      { name: "أ. شادية", email: "s.aljafry@tvtc.gov.sa" }
-    ]
+    title: "العميدة",
+    bldg: "A", floor: "الدور الأول", roomId: "A-F-13",
+    people: [{ name: "أ. ساره السويكت", email: "saraa2@tvtc.gov.sa" }]
   },
   {
-    title: "مكتب أعضاء هيئة التدريب · إدارة أعمال",
-    bldg: "B", floor: "الدور الثاني", roomId: "B-S-03",
-    people: [
-      { name: "أ. عبير السهلي", email: "abalsahli@tvtc.gov.sa" },
-      { name: "أ. غيداء الحمياني", email: "ghaida.a@tvtc.gov.sa" },
-      { name: "أ. فاطمه القحطاني" }
-    ]
+    title: "وكيلة التدريب",
+    bldg: "A", floor: "الدور الأول", roomId: "A-F-16",
+    people: [{ name: "أ. إرم الفالح", email: "erum.a@tvtc.gov.sa" }]
   },
   {
-    title: "مكتب أعضاء هيئة التدريب · الحاسب وتقنية المعلومات",
-    bldg: "A", floor: "الدور الأول", roomId: "A-F-5",
-    people: [
-      { name: "أ. جواهر الميموني", email: "jawahera@tvtc.gov.sa" },
-      { name: "أ. فاتن" },
-      { name: "أ. أمل" }
-    ]
+    title: "وكيلة شؤون المتدربات",
+    bldg: "B", floor: "الدور الأرضي", roomId: "B-G-14",
+    people: [{ name: "أ. نواعس الزلفي", email: "nawaes.a@tvtc.gov.sa" }]
   },
   {
     title: "رئيسة قسم التقنية الإدارية",
@@ -728,7 +732,7 @@ const trainersData = [
   {
     title: "رئيسة قسم الدراسات العامة",
     bldg: "B", floor: "الدور الأول", roomId: "B-F-04",
-    people: [{ name: "أ. الجوهرة الحربي" }]
+    people: [{ name: "أ. الجوهرة الحربي", email: "aljawharah.a@tvtc.gov.sa" }]
   },
   {
     title: "رئيسة قسم الوسائط المتعددة",
@@ -736,9 +740,45 @@ const trainersData = [
     people: [{ name: "أ. مشاعل العتيبي", email: "mashael.a1@tvtc.gov.sa" }]
   },
   {
-    title: "وكيلة شؤون المتدربات",
-    bldg: "B", floor: "الدور الأرضي", roomId: "B-G-14",
-    people: [{ name: "أ. نواعس الزلفي", email: "nawaes.a@tvtc.gov.sa" }]
+    title: "مكتب أعضاء هيئة التدريب · دراسات عامة",
+    bldg: "B", floor: "الدور الأول", roomId: "B-F-03",
+    people: [
+      { name: "أ. خلود العتيبي", email: "kholouda@tvtc.gov.sa" },
+      { name: "أ. روان الجبر", email: "r.aljabr@tvtc.gov.sa" },
+      { name: "أ. طرفه الحميدي", email: "t.alhomaidi@tvtc.gov.sa" },
+      { name: "أ. شادية العنزي", email: "s.aljafry@tvtc.gov.sa" }
+    ]
+  },
+  {
+    title: "مكتب أعضاء هيئة التدريب · إدارة أعمال",
+    bldg: "B", floor: "الدور الثاني", roomId: "B-S-03",
+    people: [
+      { name: "أ. عبير السهلي", email: "abalsahli@tvtc.gov.sa" },
+      { name: "أ. غيداء الحمياني", email: "ghaida.a@tvtc.gov.sa" },
+      { name: "أ. فاطمه القحطاني", email: "fatima.a2@tvtc.gov.sa" },
+      { name: "أ. وفاء القحطاني", email: "w.alqhtani@tvtc.gov.sa" },
+      { name: "أ. سهية العتيبي", email: "sahyahi@tvtc.gov.sa" }
+    ]
+  },
+  {
+    title: "مكتب أعضاء هيئة التدريب · الحاسب وتقنية المعلومات",
+    bldg: "A", floor: "الدور الأول", roomId: "A-F-5",
+    people: [
+      { name: "أ. جواهر الميموني", email: "jawahera@tvtc.gov.sa" },
+      { name: "أ. فاتن العنزي", email: "fatena1@tvtc.gov.sa" },
+      { name: "أ. أمل العضيب", email: "a.alodaib@tvtc.gov.sa" }
+    ]
+  },
+  {
+    title: "قسم الحاسب وتقنية المعلومات",
+    people: [
+      { name: "أ. مرام القويفلي", email: "malqueflie@tvtc.gov.sa" },
+      { name: "أ. مرام الشلوي", email: "maram.a3@tvtc.gov.sa" }
+    ]
+  },
+  {
+    title: "عضوة هيئة تدريب",
+    people: [{ name: "أ. حصة الرقيبة (أونلاين)", email: "Hessa.a1@tvtc.gov.sa" }]
   }
 ];
 
@@ -757,11 +797,11 @@ function openTrainers() {
     card.className = 'tr-card';
     card.innerHTML = `
       <span class="tr-title">${g.title}</span>
-      <span class="tr-office">مبنى ${g.bldg} · ${g.floor} · ${g.roomId}</span>
+      ${g.roomId ? `<span class="tr-office">مبنى ${g.bldg} · ${g.floor} · ${g.roomId}</span>` : ''}
       ${people}
-      <button class="test-btn tr-go" onclick="goToTrainerOffice(${i})">
+      ${g.roomId ? `<button class="test-btn tr-go" onclick="goToTrainerOffice(${i})">
         <i class="fas fa-location-arrow"></i> دلّني على المكتب
-      </button>`;
+      </button>` : ''}`;
     list.appendChild(card);
   });
 
