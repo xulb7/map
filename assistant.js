@@ -24,7 +24,30 @@
     maxList: 60,             // أقصى عدد عناصر في القوائم
     acceptScore: 0.78,       // حد قبول المطابقة
     suggestScore: 0.62,      // حد اقتراح "تقصدين ...؟"
-    rooms: {}                // اختياري: أسماء/أنواع القاعات، مثال: { 'A-F-11': { name: 'معمل الحاسب', type: 'معمل' } }
+    rooms: {},               // اختياري: أسماء/أنواع القاعات، مثال: { 'A-F-11': { name: 'معمل الحاسب', type: 'معمل' } }
+    trainers: [              // قائمة المدربات (office = رمز المكتب في الخريطة)
+      { name: 'خلود العتيبي', title: 'أ.', email: 'kholouda@tvtc.gov.sa', office: 'B-F-03', dept: 'الدراسات العامة' },
+      { name: 'روان الجبر', title: 'أ.', email: 'r.aljabr@tvtc.gov.sa', office: 'B-F-03', dept: 'الدراسات العامة' },
+      { name: 'طرفه الحميدي', title: 'أ.', email: 't.alhomaidi@tvtc.gov.sa', office: 'B-F-03', dept: 'الدراسات العامة' },
+      { name: 'شادية العنزي', title: 'أ.', email: 's.aljafry@tvtc.gov.sa', office: 'B-F-03', dept: 'الدراسات العامة' },
+      { name: 'عبير السهلي', title: 'أ.', email: 'abalsahli@tvtc.gov.sa', office: 'B-S-03', dept: 'إدارة الأعمال' },
+      { name: 'غيداء الحمياني', title: 'أ.', email: 'ghaida.a@tvtc.gov.sa', office: 'B-S-03', dept: 'إدارة الأعمال' },
+      { name: 'فاطمه القحطاني', title: 'أ.', email: 'fatima.a2@tvtc.gov.sa', office: 'B-S-03', dept: 'إدارة الأعمال' },
+      { name: 'وفاء القحطاني', title: 'أ.', email: 'w.alqhtani@tvtc.gov.sa', office: 'B-S-03', dept: 'إدارة الأعمال' },
+      { name: 'سهية العتيبي', title: 'أ.', email: 'sahyahi@tvtc.gov.sa', office: 'B-S-03', dept: 'إدارة الأعمال' },
+      { name: 'جواهر الميموني', title: 'أ.', email: 'jawahera@tvtc.gov.sa', office: 'A-F-05', dept: 'الحاسب وتقنية المعلومات' },
+      { name: 'فاتن العنزي', title: 'أ.', email: 'fatena1@tvtc.gov.sa', office: 'A-F-05', dept: 'الحاسب وتقنية المعلومات' },
+      { name: 'أمل العضيب', title: 'أ.', email: 'a.alodaib@tvtc.gov.sa', office: 'A-F-05', dept: 'الحاسب وتقنية المعلومات' },
+      { name: 'وضحى العوهلي', title: 'أ.', email: 'w.alohali@tvtc.gov.sa', office: 'B-S-04', dept: 'التقنية الإدارية', role: 'رئيسة قسم التقنية الإدارية' },
+      { name: 'الجوهرة الحربي', title: 'أ.', email: 'aljawharah.a@tvtc.gov.sa', office: 'B-F-04', dept: 'الدراسات العامة', role: 'رئيسة قسم الدراسات العامة' },
+      { name: 'مشاعل العتيبي', title: 'أ.', email: 'mashael.a1@tvtc.gov.sa', office: 'A-F-07', dept: 'الوسائط المتعددة', role: 'رئيسة قسم الوسائط المتعددة' },
+      { name: 'إرم الفالح', title: 'أ.', email: 'erum.a@tvtc.gov.sa', office: 'A-F-16', role: 'وكيلة التدريب' },
+      { name: 'نواعس الزلفي', title: 'أ.', email: 'nawaes.a@tvtc.gov.sa', office: 'B-G-14', role: 'وكيلة شؤون المتدربات' },
+      { name: 'حصة الرقيبة', title: 'أ.', email: 'Hessa.a1@tvtc.gov.sa', notes: 'تدرّس أونلاين' },
+      { name: 'مرام القويفلي', title: 'أ.', email: 'malqueflie@tvtc.gov.sa' },
+      { name: 'مرام الشلوي', title: 'أ.', email: 'maram.a3@tvtc.gov.sa' },
+      { name: 'ساره السويكت', title: 'أ.', email: 'saraa2@tvtc.gov.sa', office: 'A-F-13', role: 'العميدة' }
+    ]
   };
   if (window.MASAR_ASSISTANT_CONFIG && typeof window.MASAR_ASSISTANT_CONFIG === 'object') {
     for (var ck in window.MASAR_ASSISTANT_CONFIG) CONFIG[ck] = window.MASAR_ASSISTANT_CONFIG[ck];
@@ -369,6 +392,189 @@
     return null;
   }
 
+
+  /* ===================== مرادفات العامية لأسماء الأماكن ===================== */
+  // تُضاف الكلمات القياسية لنهاية السؤال (ما تحذف شي من كلام المستخدمة)
+  var SYN = [
+    [/(^|\s)(?:ال|بال|وال)?(حمام|حمامات|تواليت|دوره ميه|دورات ميه|دوره مياه|دورات مياه|دورة مياه)(?=\s|$)/, 'دورات مياه'],
+    [/(^|\s)(?:ال|بال|وال)?(لاب|لابات|لاب توب|كمبيوتر|كمبيوترات|حاسوب|حاسب|حاسبات)(?=\s|$)/, 'معمل حاسب الي'],
+    [/(^|\s)(?:ال|بال|وال)?(مكتبه|مكتبة|مكتبات)(?=\s|$)/, 'مكتبه'],
+    [/(^|\s)(?:ال|بال|وال)?(مصلي|مصلا|مصلى|صلاه)(?=\s|$)/, 'مصلي'],
+    [/(^|\s)(?:ال|بال|وال)?(كافتيريا|كفتيريا|كافيه|كوفي|مقصف|كانتين|مطعم)(?=\s|$)/, 'كافتيريا'],
+    [/(^|\s)(?:ال|بال|وال)?(عميده|عميدتنا)(?=\s|$)/, 'عميده'],
+    [/(^|\s)(رئيسه|رئيسة)\s+(قسم|القسم)(?=\s|$)/, 'رئيسه قسم']
+  ];
+
+  function addSynonyms(qn) {
+    var extra = [];
+    SYN.forEach(function (p) { if (p[0].test(qn)) extra.push(p[1]); });
+    return extra.length ? qn + ' ' + extra.join(' ') : qn;
+  }
+
+  /* ================================ المدربات ================================ */
+  // شكل البيانات المتوقع (تضيفينه في script.js أو أي ملف قبل assistant.js):
+  //   var TRAINERS = [
+  //     { name: 'نورة العتيبي', email: 'n.alotaibi@tvtc.gov.sa', office: 'A-F-12', dept: 'التقنية الإدارية', phone: '' }
+  //   ];
+  // office = رمز المكتب كما في الخريطة. الحقول الاختيارية: dept, phone, title, aliases (أسماء بديلة)
+  var TRAINER_TITLES = {};
+  ['مدربه', 'المدربه', 'مدرب', 'استاذه', 'الاستاذه', 'استاذ', 'اوستاذه', 'دكتوره', 'الدكتوره', 'دكتور', 'د', 'م', 'ا',
+   'مهندسه', 'المهندسه', 'مس', 'miss', 'dr', 'eng', 'ms', 'mrs', 'المشرفه', 'مشرفه', 'بنت', 'ال'].forEach(function (w) { TRAINER_TITLES[w] = true; });
+
+  var trainerCache = { ref: null, list: [] };
+
+  function getTrainersRaw() {
+    var t = null;
+    try { if (window.MASAR_TRAINERS) t = window.MASAR_TRAINERS; } catch (e) {}
+    try { if (!t && typeof TRAINERS !== 'undefined') t = TRAINERS; } catch (e) {}
+    if (!t && window.TRAINERS) t = window.TRAINERS;
+    if (!t && CONFIG.trainers && CONFIG.trainers.length) t = CONFIG.trainers;
+    return Array.isArray(t) ? t : null;
+  }
+
+  function tf(o, keys) {
+    for (var i = 0; i < keys.length; i++) {
+      var v = o[keys[i]];
+      if (v != null && typeof v !== 'object' && String(v).trim()) return String(v).trim();
+    }
+    return '';
+  }
+
+  function getTrainers() {
+    var raw = getTrainersRaw();
+    if (!raw) return [];
+    if (trainerCache.ref === raw && trainerCache.n === raw.length) return trainerCache.list;
+    var list = [];
+    raw.forEach(function (o) {
+      if (!o || typeof o !== 'object') return;
+      var name = tf(o, ['name', 'nameAr', 'fullName', 'trainer', 'الاسم', 'اسم']);
+      if (!name) return;
+      var t = {
+        name: name,
+        email: tf(o, ['email', 'mail', 'e-mail', 'الايميل', 'الإيميل', 'البريد']),
+        office: tf(o, ['office', 'room', 'location', 'roomId', 'المكتب', 'الموقع']),
+        dept: tf(o, ['dept', 'department', 'القسم']),
+        phone: tf(o, ['phone', 'mobile', 'tel', 'الجوال', 'الهاتف']),
+        title: tf(o, ['title', 'rank', 'اللقب']),
+        role: tf(o, ['role', 'position', 'المنصب']),
+        roleVariants: [],
+        notes: tf(o, ['note', 'notes', 'ملاحظة']),
+        variants: []
+      };
+      var names = [name];
+      if (Array.isArray(o.aliases)) names = names.concat(o.aliases);
+      names.forEach(function (nm) {
+        var toks = tokens(fixAbd(norm(nm))).map(stem).filter(function (x) { return x.length >= 2 && !TRAINER_TITLES[x]; });
+        if (toks.length) t.variants.push(toks);
+      });
+      if (t.role) {
+        var rt = tokens(norm(t.role)).map(stem).filter(function (x) { return x.length >= 2 && !TRAINER_TITLES[x] && x !== 'قسم'; });
+        if (rt.length) t.roleVariants.push(rt);
+      }
+      if (t.variants.length) list.push(t);
+    });
+    trainerCache = { ref: raw, n: raw.length, list: list };
+    return list;
+  }
+
+  // يرجع المدربات المطابقة (الأعلى تطابقاً فقط)
+  function fixAbd(s) { return s.replace(/(^|\s)عبد\s+(ال)/g, '$1عبد$2'); }
+
+  function matchTrainers(qn) {
+    var list = getTrainers();
+    if (!list.length) return [];
+    qn = fixAbd(qn);
+    var qt = tokens(qn).map(stem).filter(Boolean);
+    var qset = qt.slice();
+    for (var i = 0; i < qt.length - 1; i++) qset.push(qt[i] + qt[i + 1]);   // عبد الله = عبدالله
+    var scored = [];
+    list.forEach(function (t) {
+      var best = 0;
+      t.variants.forEach(function (toks) {
+        var hits = 0;
+        toks.forEach(function (nt) {
+          var ok = qset.some(function (q) { return q === nt || tokSim(nt, q, false) > 0; });
+          if (ok) hits++;
+        });
+        if (hits) {
+          var sc = hits + hits / toks.length * 0.5;
+          if (sc > best) best = sc;
+        }
+      });
+      t.roleVariants.forEach(function (toks) {
+        var hits = 0;
+        toks.forEach(function (nt) {
+          if (qset.some(function (q) { return q === nt || tokSim(nt, q, false) > 0; })) hits++;
+        });
+        if (hits >= Math.min(2, toks.length)) best = Math.max(best, hits + hits / toks.length * 0.5 - 0.01);
+      });
+      if (best) scored.push({ t: t, sc: best });
+    });
+    if (!scored.length) return [];
+    scored.sort(function (a, b) { return b.sc - a.sc; });
+    var top = scored[0].sc;
+    return scored.filter(function (x) { return x.sc >= top - 0.001; }).slice(0, 6).map(function (x) { return x.t; });
+  }
+
+  function findRoomEntity(code) {
+    if (!code) return null;
+    var list = getIndex() || [];
+    var c = collapse(norm(code).replace(/-0+(\d)/g, '-$1'));
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      if (!isKind(e, /room/) || !e.idKey) continue;
+      if (collapse(norm(e.idKey).replace(/-0+(\d)/g, '-$1')) === c) return e;
+    }
+    // المكتب مكتوب كاسم (مثل: مكتب المدربات)
+    var qn = norm(code);
+    for (var j = 0; j < list.length; j++) {
+      if (isKind(list[j], /room/) && list[j].names.indexOf(qn) >= 0) return list[j];
+    }
+    return null;
+  }
+
+  function trainersAt(e) {
+    var list = getTrainers();
+    if (!list.length || !e || !e.idKey) return [];
+    var c = collapse(norm(e.idKey).replace(/-0+(\d)/g, '-$1'));
+    return list.filter(function (t) {
+      return t.office && collapse(norm(t.office).replace(/-0+(\d)/g, '-$1')) === c;
+    });
+  }
+
+  function trainerCard(t) {
+    var lines = ['👩‍🏫 ' + (t.title ? t.title + ' ' : '') + t.name];
+    if (t.role) lines.push('🏷️ ' + t.role);
+    if (t.dept) lines.push('🎓 القسم: ' + t.dept);
+    var room = findRoomEntity(t.office), ent = null;
+    if (room) {
+      ent = room;
+      lines.push('📍 المكتب: ' + room.display);
+      var anc = ancestors(room), i;
+      for (i = 0; i < anc.length; i++) {
+        if (isKind(anc[i], RE_BUILDING)) { lines.push('🏢 المبنى: ' + anc[i].display); break; }
+      }
+      var fc = floorOf(room);
+      if (fc) lines.push('🧭 ' + floorLabel(fc));
+    } else if (t.office) {
+      lines.push('📍 المكتب: ' + t.office);
+    }
+    if (t.email) lines.push('📧 ' + t.email);
+    if (t.phone) lines.push('📞 ' + t.phone);
+    if (t.notes) lines.push('• ' + t.notes);
+    return { lines: lines, entity: ent };
+  }
+
+  function listTrainers() {
+    var list = getTrainers();
+    if (!list.length) return ['ما عندي قائمة المدربات للحين 🤔 بس أول ما تنضاف أقدر أجاوبك عن أي وحدة منهم.'];
+    var names = list.slice(0, CONFIG.maxList).map(function (t) { return t.name; });
+    var n = list.length, out = ['عندي ' + (n === 1 ? 'مدربة وحدة' : n === 2 ? 'مدربتين' : n <= 10 ? n + ' مدربات' : n + ' مدربة') + ' في بيانات الكلية:', names.join('، ')];
+    if (list.length > names.length) out.push('… وغيرهم. اسأليني عن اسم أي وحدة وأعطيك مكتبها وإيميلها.');
+    else out.push('اسأليني عن أي وحدة منهم وأعطيك مكتبها وإيميلها 👩‍🏫');
+    return out;
+  }
+
   /* ============================== المطابقة ============================== */
   function isCodeLike(n) {
     if (/^\d+$/.test(n)) return true;
@@ -418,6 +624,7 @@
       nonGeneric.forEach(function (t) {
         var b = 0, lb = 0;
         ctx.qtokens.forEach(function (q) {
+          if (GENERIC[q] && q !== t) return;
           var s1 = tokSim(t, q, false), s2 = tokSim(t, q, true);
           if (s1 > b) b = s1;
           if (s2 > lb) lb = s2;
@@ -436,7 +643,7 @@
   function matchEntities(rawQuery) {
     var list = getIndex();
     if (!list || !list.length) return { accepted: [], suggestion: null };
-    var qn = expandCodes(norm(rawQuery));
+    var qn = addSynonyms(expandCodes(norm(rawQuery)));
     var qt = tokens(qn).map(stem);
     var ctx = { collapsed: collapse(qn), stemmed: qt.join(' '), qtokens: qt.filter(function (t) { return t.length > 0; }) };
 
@@ -513,6 +720,9 @@
       if (txt && txt !== e.display) { used[p[1]] = true; lines.push('• ' + p[1] + ': ' + txt); }
     });
 
+    var here = trainersAt(e);
+    if (here.length) lines.push('👩‍🏫 ' + (here.length > 1 ? 'المدربات هنا: ' : 'المدربة هنا: ') + here.map(function (t) { return t.name; }).join('، '));
+
     if (e.children.length) {
       var leaves = descendants(e).filter(function (c) { return !c.children.length; });
       if (leaves.length) lines.push('• يحتوي على ' + leaves.length + ' موقع (اسأليني: وش في ' + e.display + '؟)');
@@ -580,11 +790,16 @@
     buildingsWord: /(مباني|المباني|مبان|المبان|مبنيين)/,
     buildingsQ: /(وش|ايش|شنو|كم|اي|ما هي|عدد|قائمه|اسماء|عندكم|عندنا|فيه|موجوده|اعرض|ورني|وريني)/,
     count: /(كم|عدد)/,
-    nav: /(كيف اوصل|كيف اروح|كيف اجي|اوصل|اروح|طريق|الطريق|المسار|توصلني|دلني|دليني|اتجاه|اقرب طريق)/,
-    campus: /(قاعه|قاعات|مبني|مبان|كليه|دور|معمل|مكتب|وين|فين|اوصل|اروح|موقع|مكان|محاضره|مدرج|مكتبه|مصلي|كافتيريا|مطعم|دورات|مخرج|مدخل|بوابه|طابق|ممر)/
+    nav: /(كيف اوصل|كيف اروح|كيف اجي|شلون اوصل|شلون اروح|وشلون اوصل|اوصل|اروح|الاقي|الاقي|لاقي|طريق|الطريق|المسار|توصلني|وصلني|وديني|دلني|دليني|اتجاه|اقرب طريق)/,
+    trainerQ: /(مدربه|مدربات|المدربه|المدربات|استاذه|دكتوره|مهندسه|مين|منو|منهي|من هي|ايميل|بريد|ايميلها|بريدها|مكتبها|وينها|وين مكتب|تجلس|قاعده|موجوده)/,
+    trainerList: /(كل المدربات|جميع المدربات|المدربات|قائمه المدربات|اسماء المدربات|كم مدربه|عدد المدربات|وش المدربات|مين المدربات|مين مدرباتنا)/,
+    trainerFollowStrict: /(مكتبها|ايميلها|بريدها|وينها|قسمها|رقمها|جوالها|تجلس)/,
+    trainerFollow: /(مكتبها|ايميلها|بريدها|وينها|وين مكتبها|وين تجلس|قسمها|رقمها|جوالها|تواصل|ايميل|مكتب)/,
+    campus: /(قاعه|قاعات|مبني|مبان|كليه|دور|معمل|مكتب|وين|فين|اوصل|اروح|موقع|مكان|محاضره|مدرج|مكتبه|مصلي|كافتيريا|مطعم|دورات|مخرج|مدخل|بوابه|طابق|ممر|مدربه|مدربات|استاذه|دكتوره|عميده|رئيسه|حمام|لاب|مسرح|مستشفي|قسم)/
   };
 
   var lastEntity = null;
+  var lastTrainer = null;
 
   function answer(rawQuery) {
     var original = String(rawQuery || '').trim();
@@ -607,8 +822,8 @@
       if (RE.thanks.test(qn)) { res.lines = [pick(['العفو، أي وقت! 🌷', 'حياك الله، أبشري بأي شي ثاني 🌸'])]; return res; }
       if (RE.bye.test(qn)) { res.lines = ['الله يحفظك، بالتوفيق! 🌟']; return res; }
       if (RE.help.test(qn)) {
-        res.lines = ['أنا مساعد مسار 🧭 أساعدك تعرفين وين المباني والقاعات في الكلية وش فيها، وأجاوب من بيانات الكلية بس.',
-                     'جربي تسألين عن قاعة أو مبنى، أو اطلبي قائمة المباني.'];
+        res.lines = ['أنا مساعد مسار 🧭 أساعدك تعرفين وين المباني والقاعات في الكلية وش فيها، وأجاوب عن المدربات (مكتبها وإيميلها)، وأفهم لهجتك عادي.',
+                     'جربي: «وين مكتب العميدة؟» أو «مين نورة؟» أو «وش في مبنى A؟»'];
         res.chips = sampleChips();
         return res;
       }
@@ -617,6 +832,46 @@
         res.chips = sampleChips();
         return res;
       }
+    }
+
+    // 1.5) المدربات
+    var hasTrainers = getTrainers().length > 0;
+    if (RE.trainerList.test(qn) && !matchTrainers(qn).length &&
+        (!m.accepted.length || (/(اسماء|قائمه|كم|عدد|كل|جميع|اعرض|ورني|وريني)/.test(qn) && !/مكتب/.test(qn)))) {
+      res.lines = listTrainers();
+      return res;
+    }
+    var tm = matchTrainers(qn);
+    if (tm.length && (!m.accepted.length || RE.trainerQ.test(qn))) {
+      if (tm.length === 1) {
+        var card = trainerCard(tm[0]);
+        res.lines = [pick(['أبشري، هذي معلوماتها 👇', 'حياك، تفضلي 👇', 'تمام، هذي هي 👇'])].concat(card.lines);
+        res.entity = card.entity;
+        lastTrainer = tm[0];
+        if (card.entity) lastEntity = card.entity;
+        return res;
+      }
+      res.lines = ['لقيت أكثر من مدربة قريبة من سؤالك، أي وحدة تقصدين؟ 👇'];
+      res.chips = tm.slice(0, 4).map(function (t) { return 'مين ' + t.name + '؟'; });
+      return res;
+    }
+    // سؤال متابعة عن آخر مدربة ("وين مكتبها؟" / "وش ايميلها؟")
+    if (lastTrainer && !/(مدربه|استاذه|دكتوره)/.test(qn) &&
+        (qtok.length <= 5 && RE.trainerFollowStrict.test(qn))) {
+      var fcard = trainerCard(lastTrainer);
+      res.lines = fcard.lines;
+      res.entity = fcard.entity;
+      return res;
+    }
+    if (hasTrainers && !m.accepted.length && /(مدربه|استاذه|دكتوره)/.test(qn) && RE.trainerQ.test(qn)) {
+      res.lines = ['ما لقيت مدربة بهالاسم 🤔 جربي تكتبين الاسم الأول والأخير، أو اطلبي «قائمة المدربات».'];
+      res.chips = ['وش أسماء المدربات؟'];
+      return res;
+    }
+    if (!hasTrainers && !m.accepted.length && /(مدربه|مدربات|استاذه|دكتوره)/.test(qn)) {
+      res.lines = ['بيانات المدربات ما انضافت عندي للحين 🙏 بس أقدر أساعدك في القاعات والمباني.'];
+      res.chips = sampleChips();
+      return res;
     }
 
     // 2) مكان/أماكن محددة
@@ -695,7 +950,8 @@
     }
     if (bld) chips.push('وش في ' + bld.display + '؟');
     if (leaf) chips.push('وين ' + leaf.display + '؟');
-    return chips.slice(0, 3);
+    if (getTrainers().length) chips.push('وش أسماء المدربات؟');
+    return chips.slice(0, 4);
   }
 
   /* ================================ الواجهة ================================ */
@@ -942,7 +1198,7 @@
       welcomed = true;
       var hasData = !!getData();
       addBubble(hasData
-        ? 'هلا والله 👋 أنا مساعد مسار. أساعدك تلقين المباني والقاعات في الكلية. اسأليني وأبشري!'
+        ? 'هلا والله 👋 أنا مساعد مسار. أساعدك تلقين القاعات والمكاتب وأجاوب عن المدربات. اسأليني بلهجتك وأبشري!'
         : 'هلا والله 👋 أنا مساعد مسار، بس بيانات الكلية ما تحمّلت للحين. حدّثي الصفحة وجربي.', 'bot');
       if (hasData) addChips(sampleChips());
     }
