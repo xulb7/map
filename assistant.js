@@ -225,13 +225,24 @@
   function roomInfo(id) {
     var rooms = CONFIG.rooms || {}, k;
     for (k in rooms) { if (norm(k) === norm(id)) return rooms[k]; }
-    // أسماء الغرف المعرّفة في script.js (ROOM_NAMES_BY_KEY) — قراءة فقط
-    try {
-      if (typeof ROOM_NAMES_BY_KEY !== 'undefined') {
-        var nm = ROOM_NAMES_BY_KEY[String(id).toUpperCase().replace(/-0+(\d)/g, '-$1')];
-        if (nm) return { name: nm };
-      }
-    } catch (e) {}
+    // أسماء الغرف المعرّفة في script.js (roomNamesRaw / roomNames / ROOM_NAMES_BY_KEY) — قراءة فقط
+    var key = String(id).toUpperCase().replace(/-0+(\d)/g, '-$1'), nm = null, src;
+    try { if (typeof roomNames !== 'undefined') nm = roomNames[key]; } catch (e) {}
+    if (!nm) {
+      try {
+        if (typeof roomNamesRaw !== 'undefined') {
+          for (src in roomNamesRaw) {
+            if (String(src).toUpperCase().replace(/-0+(\d)/g, '-$1') === key) { nm = roomNamesRaw[src]; break; }
+          }
+        }
+      } catch (e) {}
+    }
+    if (!nm) { try { if (typeof ROOM_NAMES_BY_KEY !== 'undefined') nm = ROOM_NAMES_BY_KEY[key]; } catch (e) {} }
+    if (nm) {
+      nm = String(nm).trim();
+      var parts = nm.split(/\s*\+\s*/).filter(Boolean);        // "رئيسة قسم + مكتب التصوير"
+      return { name: nm, aliases: parts.length > 1 ? parts : [] };
+    }
     return null;
   }
 
@@ -396,7 +407,7 @@
   /* ===================== مرادفات العامية لأسماء الأماكن ===================== */
   // تُضاف الكلمات القياسية لنهاية السؤال (ما تحذف شي من كلام المستخدمة)
   var SYN = [
-    [/(^|\s)(?:ال|بال|وال)?(حمام|حمامات|تواليت|دوره ميه|دورات ميه|دوره مياه|دورات مياه|دورة مياه)(?=\s|$)/, 'دورات مياه'],
+    [/(^|\s)(?:ال|بال|وال)?(حمام|حمامات|تواليت|دوره ميه|دورات ميه|دوره مياه|دورات مياه|دورة مياه)(?=\s|$)/, 'دوره مياه'],
     [/(^|\s)(?:ال|بال|وال)?(لاب|لابات|لاب توب|كمبيوتر|كمبيوترات|حاسوب|حاسب|حاسبات)(?=\s|$)/, 'معمل حاسب الي'],
     [/(^|\s)(?:ال|بال|وال)?(مكتبه|مكتبة|مكتبات)(?=\s|$)/, 'مكتبه'],
     [/(^|\s)(?:ال|بال|وال)?(مصلي|مصلا|مصلى|صلاه)(?=\s|$)/, 'مصلي'],
@@ -620,7 +631,7 @@
       }
 
       // 3) مطابقة كلمة بكلمة مع تسامح إملائي
-      var sum = 0, lsum = 0, minBest = 1, anyHit = false;
+      var sum = 0, lsum = 0, minBest = 1, anyHit = false, exact = 0;
       nonGeneric.forEach(function (t) {
         var b = 0, lb = 0;
         ctx.qtokens.forEach(function (q) {
@@ -629,12 +640,14 @@
           if (s1 > b) b = s1;
           if (s2 > lb) lb = s2;
         });
+        if (b === 1) exact++;
         sum += b; lsum += lb;
         if (b < minBest) minBest = b;
         if (b > 0) anyHit = true;
       });
       var avg = sum / nonGeneric.length, lavg = lsum / nonGeneric.length;
       if (avg >= 0.74 && minBest >= 0.66) best = Math.max(best, 0.5 + 0.38 * avg);
+      else if (exact >= 2 && exact / nonGeneric.length >= 0.5) best = Math.max(best, 0.8);
       else if (anyHit || lavg > 0) loose = Math.max(loose, 0.5 + 0.38 * lavg);
     }
     return { score: best, loose: loose };
@@ -669,7 +682,7 @@
       return (b.score - a.score) || (b.e.display.length - a.e.display.length);
     });
     var top = accepted.length ? accepted[0].score : 0;
-    accepted = accepted.filter(function (x) { return x.score >= top - 0.03; }).slice(0, 4);
+    accepted = accepted.filter(function (x) { return x.score >= top - 0.03; }).slice(0, 14);
 
     var suggestion = null;
     if (!accepted.length) {
@@ -893,11 +906,21 @@
 
       var out = [];
       out.push(pick(['أبشري، هذا اللي لقيته 👇', 'حياك، هذي المعلومات 👇', 'تمام، تفضلي 👇']));
-      if (m.accepted.length > 1) out.push('لقيت أكثر من نتيجة قريبة من سؤالك:');
-      m.accepted.forEach(function (e, i) {
-        if (i > 0) out.push('');
-        out = out.concat(detailLines(e));
-      });
+      if (m.accepted.length > 1) out.push('لقيت ' + m.accepted.length + ' نتائج قريبة من سؤالك:');
+      if (m.accepted.length > 2) {
+        m.accepted.forEach(function (e) {
+          var anc = ancestors(e), b = '', k, fcode = floorOf(e), tr = trainersAt(e);
+          for (k = 0; k < anc.length; k++) { if (isKind(anc[k], RE_BUILDING)) { b = anc[k].display; break; } }
+          out.push('📍 ' + e.display + (b || fcode ? ' — ' + [b, fcode ? floorLabel(fcode) : ''].filter(Boolean).join('، ') : '') +
+                   (tr.length ? ' (' + tr.map(function (t) { return t.name; }).join('، ') + ')' : ''));
+        });
+        out.push('', 'اكتبي رمز القاعة (مثل ' + m.accepted[0].idKey + ') وأعطيك تفاصيلها.');
+      } else {
+        m.accepted.forEach(function (e, i) {
+          if (i > 0) out.push('');
+          out = out.concat(detailLines(e));
+        });
+      }
       if (RE.nav.test(qn)) out.push('', 'ولو تبغين المسار، اختاريه من البحث في الخريطة وبيطلع لك الطريق 🧭');
       res.lines = out;
       res.entity = first;
