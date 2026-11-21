@@ -556,7 +556,7 @@
   function trainerCard(t) {
     var lines = ['👩‍🏫 ' + (t.title ? t.title + ' ' : '') + t.name];
     if (t.role) lines.push('🏷️ ' + t.role);
-    if (t.dept) lines.push('🎓 القسم: ' + t.dept);
+    if (t.dept) lines.push('القسم: ' + t.dept);
     var room = findRoomEntity(t.office), ent = null;
     if (room) {
       ent = room;
@@ -831,27 +831,27 @@
         lv.courses.forEach(function (c) {
           lines.push('• ' + c[0] + ' — ' + c[1] + (c[3] != null ? ' (' + c[3] + (c[3] === 1 ? ' وحدة' : c[3] === 2 ? ' وحدتان' : ' وحدات') + ')' : '') + (c[2] && c[2] !== '-' ? ' | المتطلب: ' + c[2] : ''));
         });
-        lines.push('', 'الخطة كاملة في زر «دليل المستجدين» 🎓');
+        lines.push('', 'الخطة كاملة في زر «دليل المستجدين»');
         return { lines: lines, chips: [] };
       }
       var names = major.levels.map(function (l) { return l.name; });
       return { lines: ['📚 ' + major.name + ' فيه ' + names.length + ' مستويات: ' + names.join('، ') + '.',
-                       'اكتبي المستوى اللي تبينه (مثل: مقررات ' + major.name + ' المستوى الأول) أو افتحي زر «دليل المستجدين» 🎓'],
+                       'اكتبي المستوى اللي تبينه (مثل: مقررات ' + major.name + ' المستوى الأول) أو افتحي زر «دليل المستجدين»'],
                chips: ['مقررات ' + major.name + ' المستوى الأول'] };
     }
     if (/(تخصصات|التخصصات)/.test(qn) || (major && !roomMatched && !planWords.test(qn) && /(وش|ايش|شنو|عن|معلومات)/.test(qn) && !RE.nav.test(qn))) {
       if (!major) {
         var all = (g.majors || []).map(function (m) { return '• ' + m.name; });
-        return { lines: ['التخصصات الموجودة في دليل المستجدين:'].concat(all, ['', 'اسأليني عن مقررات أي تخصص، أو افتحي زر «دليل المستجدين» 🎓']),
+        return { lines: ['التخصصات الموجودة في دليل المستجدين:'].concat(all, ['', 'اسأليني عن مقررات أي تخصص، أو افتحي زر «دليل المستجدين»']),
                  chips: (g.majors || []).slice(0, 2).map(function (m) { return 'مقررات ' + m.name; }) };
       }
-      return { lines: ['🎓 ' + major.name + ' — ' + major.dept + '.', major.note, 'اسأليني عن مقرراته (مثل: مقررات ' + major.name + ' المستوى الثاني).'],
+      return { lines: ['' + major.name + ' — ' + major.dept + '.', major.note, 'اسأليني عن مقرراته (مثل: مقررات ' + major.name + ' المستوى الثاني).'],
                chips: ['مقررات ' + major.name + ' المستوى الأول'] };
     }
 
     // الدليل نفسه
     if (/(دليل المستجد|دليل المستجدات|دليل الطالبه|دليل الطالبات)/.test(qn)) {
-      return { lines: ['🎓 «دليل المستجدين» فيه خطط التخصصات، وملخص الأنظمة واللوائح (الغياب، التقويم، الانسحاب، التخرج، قواعد السلوك)، وأسئلة شائعة. تلقين زره في الصفحة، وأقدر أجاوبك منه مباشرة، اسأليني.'],
+      return { lines: ['«دليل المستجدين» فيه خطط التخصصات، وملخص الأنظمة واللوائح (الغياب، التقويم، الانسحاب، التخرج، قواعد السلوك)، وأسئلة شائعة. تلقين زره في الصفحة، وأقدر أجاوبك منه مباشرة، اسأليني.'],
                chips: ['كم نسبة الغياب المسموحة؟', 'وش التخصصات؟'] };
     }
 
@@ -860,7 +860,7 @@
       k = g.faq[i];
       if (k.k && !(roomMatched && /(وين|فين|اوصل|اروح|موقع|مكان)/.test(qn)) &&
           new RegExp('(^|\\s)(?:ال|وال|بال|لل|ب|و)?(' + k.k + ')').test(qn)) {
-        return { lines: [k.a, '📎 ' + k.s, 'للتفاصيل الكاملة افتحي زر «دليل المستجدين» 🎓'], chips: [] };
+        return { lines: [k.a, '📎 ' + k.s, 'للتفاصيل الكاملة افتحي زر «دليل المستجدين»'], chips: [] };
       }
     }
     return null;
