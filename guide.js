@@ -246,7 +246,114 @@
       s: 'قواعد تنظيم السلوك، المواد 2 و3 و8', k: 'درجات المخالف|درجه المخالف|مخالفه|مخالفات|عقوبه|عقوبات|لجنه الانضباط|لجنه ضبط|قواعد السلوك|تنظيم السلوك' }
   ];
 
-  window.MASAR_GUIDE = { majors: MAJORS, regs: REGS, faq: FAQ, sources: SRC };
+
+  /* ============================== التقويم التدريبي ============================== */
+  // أسابيع الفصل الأول: الأحد إلى السبت. أسبوع إجازة الخريف يأتي بعد الأسبوع 13 ولا يُعدّ من الأسابيع المرقمة.
+  // لتحديث التقويم في فصل جديد: غيّري start وhijriStart وevents (والتواريخ بصيغة [سنة, شهر, يوم]).
+  var CAL = {
+    title: 'التقويم التدريبي للعام 1448-1449هـ',
+    start: [2026, 8, 23],
+    hijriStart: [1448, 3, 10],
+    monthLens: { 3: 29, 4: 30, 5: 30, 6: 29, 7: 30 },
+    weeks: 19,
+    breakAfter: 13,
+    // d = أول يوم، to = آخر يوم إجازة (اختياري)، ret = يوم العودة للتدريب (اختياري)، h/hto = التاريخ الهجري كما في التقويم
+    events: [
+      { d: [2026, 8, 23], h: '10/3/1448هـ', t: 'بداية التدريب للفصل التدريبي الأول', k: 'start' },
+      { d: [2026, 9, 23], to: [2026, 9, 26], h: '12/4/1448هـ', hto: '15/4/1448هـ', t: 'إجازة اليوم الوطني', k: 'holiday' },
+      { d: [2026, 11, 20], to: [2026, 11, 28], ret: [2026, 11, 29], h: '10/6/1448هـ', hto: '18/6/1448هـ', t: 'إجازة الخريف', k: 'holiday' },
+      { d: [2026, 12, 27], h: '18/7/1448هـ', t: 'بداية اختبارات الفصل التدريبي الأول', k: 'exam' },
+      { d: [2027, 1, 7], h: '29/7/1448هـ', t: 'نهاية الفصل التدريبي الأول', k: 'end' },
+      { d: [2027, 1, 8], to: [2027, 1, 16], ret: [2027, 1, 17], h: '30/7/1448هـ', hto: '8/8/1448هـ', t: 'إجازة منتصف العام التدريبي', k: 'holiday' },
+      { d: [2027, 1, 17], h: '9/8/1448هـ', t: 'بداية الفصل التدريبي الثاني', k: 'start' },
+      { d: [2027, 2, 19], to: [2027, 2, 22], h: '12/9/1448هـ', hto: '15/9/1448هـ', t: 'إجازة يوم التأسيس', k: 'holiday' },
+      { d: [2027, 2, 26], to: [2027, 3, 13], ret: [2027, 3, 14], h: '19/9/1448هـ', hto: '5/10/1448هـ', t: 'إجازة عيد الفطر', k: 'holiday' },
+      { d: [2027, 5, 7], to: [2027, 5, 22], ret: [2027, 5, 23], h: '1/12/1448هـ', hto: '16/12/1448هـ', t: 'إجازة عيد الأضحى', k: 'holiday' },
+      { d: [2027, 6, 13], h: '8/1/1449هـ', t: 'بداية اختبارات الفصل الثاني واختبارات الإكمال في المعاهد', k: 'exam' },
+      { d: [2027, 6, 24], h: '19/1/1449هـ', t: 'بداية إجازة نهاية العام التدريبي', k: 'holiday' },
+      { d: [2027, 8, 10], h: '8/3/1449هـ', t: 'عودة القيادات الإشرافية', k: 'other' },
+      { d: [2027, 8, 15], h: '13/3/1449هـ', t: 'عودة أعضاء هيئة التدريب', k: 'other' },
+      { d: [2027, 8, 22], h: '20/3/1449هـ', t: 'بداية التدريب للعام 1449/1450هـ', k: 'start' }
+    ]
+  };
+  var DAY_MS = 86400000;
+  var DAY_NAMES = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  var MONTH_NAMES = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+  var ORD = ['الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر',
+             'الحادي عشر', 'الثاني عشر', 'الثالث عشر', 'الرابع عشر', 'الخامس عشر', 'السادس عشر', 'السابع عشر', 'الثامن عشر', 'التاسع عشر'];
+
+  function toMs(a) { return Date.UTC(a[0], a[1] - 1, a[2]); }
+  var START_MS = toMs(CAL.start);
+
+  function fmtG(ms, withDay) {
+    var d = new Date(ms);
+    return (withDay === false ? '' : DAY_NAMES[d.getUTCDay()] + ' ') + d.getUTCDate() + ' ' + MONTH_NAMES[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+  }
+  function hijriOf(ms) {
+    var days = Math.round((ms - START_MS) / DAY_MS);
+    var y = CAL.hijriStart[0], m = CAL.hijriStart[1], d = CAL.hijriStart[2] + days;
+    while (d > (CAL.monthLens[m] || 30)) { d -= (CAL.monthLens[m] || 30); m++; if (m > 12) { m = 1; y++; } }
+    return d + '/' + m + '/' + y + 'هـ';
+  }
+  function dateText(ms) { return fmtG(ms) + ' (' + hijriOf(ms) + ')'; }
+  function rangeText(a, b) { return fmtG(a, false) + ' إلى ' + fmtG(b, false); }
+
+  function buildWeeks() {
+    var list = [], n, off;
+    for (n = 1; n <= CAL.weeks; n++) {
+      off = 7 * (n - 1) + (n > CAL.breakAfter ? 7 : 0);
+      list.push({ n: n, label: 'الأسبوع ' + ORD[n - 1], from: START_MS + off * DAY_MS, to: START_MS + (off + 6) * DAY_MS, holiday: false });
+      if (n === CAL.breakAfter) {
+        off = 7 * n;
+        list.push({ n: 0, label: 'إجازة الخريف', from: START_MS + off * DAY_MS, to: START_MS + (off + 6) * DAY_MS, holiday: true });
+      }
+    }
+    return list;
+  }
+  var WEEKS = buildWeeks();
+
+  function todayMs() {
+    var t = new Date();
+    return Date.UTC(t.getFullYear(), t.getMonth(), t.getDate());
+  }
+
+  function weekText(nowMs) {
+    var now = nowMs == null ? todayMs() : nowMs, i, w;
+    if (now < WEEKS[0].from) {
+      return 'الفصل التدريبي الأول يبدأ ' + dateText(WEEKS[0].from) + '، أي بعد ' + Math.round((WEEKS[0].from - now) / DAY_MS) + ' يوم.';
+    }
+    for (i = 0; i < WEEKS.length; i++) {
+      w = WEEKS[i];
+      if (now >= w.from && now <= w.to) {
+        if (w.holiday) return 'الحين أسبوع إجازة الخريف (' + rangeText(w.from, w.to) + ').';
+        return 'الحين ' + w.label + ' (' + rangeText(w.from, w.to) + ').';
+      }
+    }
+    var nx = CAL.events.filter(function (e) { return (e.to ? toMs(e.to) : toMs(e.d)) >= now; })[0];
+    return nx ? 'انتهت أسابيع الفصل الأول المرقمة. أقرب موعد في التقويم: ' + eventText(nx, now) + '.' : 'انتهى التقويم المضاف في الدليل.';
+  }
+
+  function eventText(e, now) {
+    var from = toMs(e.d), to = e.to ? toMs(e.to) : null;
+    var when = to ? rangeText(from, to) : fmtG(from);
+    var h = e.h + (e.hto ? ' إلى ' + e.hto : '');
+    var s = e.t + ': ' + when + ' (' + h + ')';
+    if (e.ret) s += '، والعودة للتدريب ' + fmtG(toMs(e.ret));
+    if ((to || from) < now) s += ' — انتهى';
+    return s;
+  }
+
+  function eventLines(kind, nowMs) {
+    var now = nowMs == null ? todayMs() : nowMs;
+    return CAL.events.filter(function (e) {
+      if (!kind) return true;
+      return kind === 'holiday' ? e.k === 'holiday' : e.k === kind;
+    }).map(function (e) { return eventText(e, now); });
+  }
+
+
+  window.MASAR_GUIDE = { majors: MAJORS, regs: REGS, faq: FAQ, sources: SRC, calendar: CAL,
+    calc: { weekText: weekText, eventLines: eventLines, dateText: dateText, rangeText: rangeText } };
 
   /* ================================= الواجهة ================================= */
   var CSS = [
@@ -263,7 +370,7 @@
     '#masar-guide .mg-x,#masar-guide .mg-back{background:transparent;border:0;color:inherit;cursor:pointer;min-width:36px;height:36px;border-radius:18px;font-size:18px;padding:0 8px}',
     '#masar-guide .mg-x:hover,#masar-guide .mg-back:hover{background:rgba(255,255,255,.18)}',
     '#masar-guide .mg-tabs{display:flex;gap:6px;padding:10px 10px 0;background:var(--mg-bg);border-bottom:1px solid var(--mg-border)}',
-    '#masar-guide .mg-tab{flex:1;border:0;background:transparent;color:var(--mg-muted);padding:9px 4px;font-size:14px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent}',
+    '#masar-guide .mg-tab{flex:1;border:0;background:transparent;color:var(--mg-muted);padding:9px 2px;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent}',
     '#masar-guide .mg-tab.mg-on{color:var(--mg-primary);border-bottom-color:var(--mg-primary)}',
     '#masar-guide.mg-dark .mg-tab.mg-on{color:var(--mg-text)}',
     '#masar-guide .mg-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 12px calc(18px + env(safe-area-inset-bottom,0px))}',
@@ -416,6 +523,26 @@
     body.appendChild(el('p', 'mg-note', 'الملفات الرسمية: <a href="' + esc(SRC.reg.file) + '" target="_blank" rel="noopener">' + esc(SRC.reg.name) + '</a> · <a href="' + esc(SRC.conduct.file) + '" target="_blank" rel="noopener">' + esc(SRC.conduct.name) + '</a>'));
   }
 
+
+  /* ------------------------------ التقويم ------------------------------ */
+  function renderCal() {
+    var body = ui.body;
+    body.innerHTML = '';
+    body.appendChild(el('p', 'mg-note', '<b>' + esc(CAL.title) + '</b><br>' + esc(weekText())));
+    var d1 = el('details');
+    d1.open = true;
+    d1.appendChild(el('summary', null, 'التواريخ المهمة للعام'));
+    d1.appendChild(el('div', 'mg-in', eventLines().map(function (l) { return '<p class="mg-item">' + esc(l) + '</p>'; }).join('')));
+    body.appendChild(d1);
+    var d2 = el('details');
+    d2.appendChild(el('summary', null, 'توزيع الأسابيع (الأحد إلى السبت)'));
+    var rows = WEEKS.map(function (w) {
+      return '<tr><td>' + (w.holiday ? '<b>' + esc(w.label) + '</b>' : esc(w.label)) + '</td><td>' + esc(fmtG(w.from, false)) + '</td><td>' + esc(fmtG(w.to, false)) + '</td></tr>';
+    }).join('');
+    d2.appendChild(el('div', 'mg-in', '<div class="mg-scroll"><table><thead><tr><th>الأسبوع</th><th>من</th><th>إلى</th></tr></thead><tbody>' + rows + '</tbody></table></div>'));
+    body.appendChild(d2);
+  }
+
   /* ------------------------------ الأسئلة ------------------------------ */
   function renderFaq() {
     var body = ui.body;
@@ -452,13 +579,14 @@
     ui.title.textContent = (state.tab === 'majors' && state.major != null) ? MAJORS[state.major].name : 'دليل المستجدين';
     if (state.tab === 'majors') renderMajors();
     else if (state.tab === 'regs') renderRegs();
+    else if (state.tab === 'cal') renderCal();
     else renderFaq();
     ui.body.scrollTop = 0;
   }
 
   function open(tab) {
     build();
-    if (tab === 'majors' || tab === 'regs' || tab === 'faq') { state.tab = tab; state.major = null; }
+    if (tab === 'majors' || tab === 'regs' || tab === 'cal' || tab === 'faq') { state.tab = tab; state.major = null; }
     ui.root.classList.toggle('mg-dark', isPageDark());
     ui.overlay.classList.add('mg-open');
     render();
@@ -501,7 +629,7 @@
     head.appendChild(x);
 
     var tabs = el('div', 'mg-tabs');
-    [['majors', 'التخصصات'], ['regs', 'الأنظمة'], ['faq', 'أسئلة شائعة']].forEach(function (t) {
+    [['majors', 'التخصصات'], ['regs', 'الأنظمة'], ['cal', 'التقويم'], ['faq', 'أسئلة شائعة']].forEach(function (t) {
       var b = el('button', 'mg-tab', t[1]);
       b.type = 'button';
       b.setAttribute('data-tab', t[0]);

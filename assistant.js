@@ -817,6 +817,30 @@
     if (!g) return null;
     var i, k;
 
+    // التقويم التدريبي
+    if (g.calc) {
+      var cl = null;
+      var named = null;
+      ['التاسيس', 'الفطر', 'الاضحي', 'الوطني', 'الخريف', 'منتصف'].forEach(function (w) { if (qn.indexOf(w) >= 0) named = w; });
+      if (named && /(متي|موعد|كم|وش|ايش|اجازه|عطله|يبدا|بدايه|ترجع|نرجع|رجوع)/.test(qn)) {
+        cl = g.calc.eventLines().filter(function (x) { return norm(x).indexOf(named) >= 0; });
+      }
+      if (cl && cl.length) {
+        // تم العثور على موعد محدد بالاسم
+      } else if (/(اي اسبوع|اسبوع كم|الاسبوع كم|كم الاسبوع|في اي اسبوع)/.test(qn)) {
+        cl = [g.calc.weekText()];
+      } else if (/(اختبارات|الاختبارات|اختبار نهائي|النهائيات|موعد الاختبار|متي الاختبار)/.test(qn) && !/(غش|اغش)/.test(qn)) {
+        cl = g.calc.eventLines('exam');
+      } else if (/(اجازه|اجازات|عطله|عطل|اجازتنا)/.test(qn) && !/(مرضيه)/.test(qn)) {
+        cl = ['الإجازات في التقويم:'].concat(g.calc.eventLines('holiday').map(function (x) { return '• ' + x; }));
+      } else if (/(بدايه الفصل|بدايه الدراسه|بدايه التدريب|متي نبدا|متي يبدا الفصل|متي نداوم)/.test(qn)) {
+        cl = g.calc.eventLines('start');
+      } else if (/(التقويم|تقويم)/.test(qn)) {
+        cl = ['أهم تواريخ العام التدريبي:'].concat(g.calc.eventLines().map(function (x) { return '• ' + x; }), ['', g.calc.weekText()]);
+      }
+      if (cl && cl.length) return { lines: cl.concat(['', 'الجدول الكامل في زر «دليل المستجدين» خانة التقويم']), chips: ['في أي أسبوع نحن؟', 'متى الاختبارات؟'] };
+    }
+
     // التخصصات والخطط
     var major = null;
     (g.majors || []).forEach(function (mj) {
@@ -1051,8 +1075,8 @@
     if (bld) chips.push('وش في ' + bld.display + '؟');
     if (leaf) chips.push('وين ' + leaf.display + '؟');
     if (getTrainers().length) chips.push('وش أسماء المدربات؟');
-    if (getGuide()) chips.push('كم نسبة الغياب المسموحة؟');
-    return chips.slice(0, 5);
+    if (getGuide()) { chips.push('كم نسبة الغياب المسموحة؟'); chips.push('في أي أسبوع نحن؟'); }
+    return chips.slice(0, 6);
   }
 
   /* ================================ الواجهة ================================ */
