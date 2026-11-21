@@ -793,6 +793,79 @@
     return [(wantCount ? 'عندنا ' + (b.length === 1 ? 'مبنى واحد' : b.length === 2 ? 'مبنيين' : b.length + ' مباني') + ': ' : 'المباني الموجودة في بيانات الكلية: ') + names.join('، ')];
   }
 
+
+  /* ============================ دليل المستجدين ============================ */
+  // يقرأ window.MASAR_GUIDE (يُعرَّف في guide.js) وقت السؤال، فلا يهم ترتيب تحميل الملفين
+  function getGuide() {
+    try { return window.MASAR_GUIDE || null; } catch (e) { return null; }
+  }
+
+  function parseLevelNo(qn) {
+    var t = tokens(qn).map(stem);
+    function has(a) { return a.some(function (w) { return t.indexOf(w) >= 0; }); }
+    if (has(['تعاوني', 'تعاونيه'])) return 5;
+    if (has(['خامس', 'خامسه', '5'])) return 5;
+    if (has(['رابع', 'رابعه', '4'])) return 4;
+    if (has(['ثالث', 'ثالثه', '3'])) return 3;
+    if (has(['ثاني', 'ثانيه', '2'])) return 2;
+    if (has(['اول', 'اولي', 'الاول', '1'])) return 1;
+    return null;
+  }
+
+  function guideAnswer(qn, roomMatched) {
+    var g = getGuide();
+    if (!g) return null;
+    var i, k;
+
+    // التخصصات والخطط
+    var major = null;
+    (g.majors || []).forEach(function (mj) {
+      if (mj.k && new RegExp(mj.k).test(qn)) major = mj;
+    });
+    var planWords = /(مقرر|مقررات|مواد|ماده|خطه|خطط|منهج|مناهج|مستوي|فصل|ندرس|تدرس|ادرس|ادرسه|متطلب)/;
+    if (major && planWords.test(qn)) {
+      var no = parseLevelNo(qn);
+      if (no && major.levels[no - 1]) {
+        var lv = major.levels[no - 1];
+        var lines = ['📚 ' + major.name + ' — ' + lv.name + ':'];
+        lv.courses.forEach(function (c) {
+          lines.push('• ' + c[0] + ' — ' + c[1] + (c[3] != null ? ' (' + c[3] + (c[3] === 1 ? ' وحدة' : c[3] === 2 ? ' وحدتان' : ' وحدات') + ')' : '') + (c[2] && c[2] !== '-' ? ' | المتطلب: ' + c[2] : ''));
+        });
+        lines.push('', 'الخطة كاملة في زر «دليل المستجدين» 🎓');
+        return { lines: lines, chips: [] };
+      }
+      var names = major.levels.map(function (l) { return l.name; });
+      return { lines: ['📚 ' + major.name + ' فيه ' + names.length + ' مستويات: ' + names.join('، ') + '.',
+                       'اكتبي المستوى اللي تبينه (مثل: مقررات ' + major.name + ' المستوى الأول) أو افتحي زر «دليل المستجدين» 🎓'],
+               chips: ['مقررات ' + major.name + ' المستوى الأول'] };
+    }
+    if (/(تخصصات|التخصصات)/.test(qn) || (major && !roomMatched && !planWords.test(qn) && /(وش|ايش|شنو|عن|معلومات)/.test(qn) && !RE.nav.test(qn))) {
+      if (!major) {
+        var all = (g.majors || []).map(function (m) { return '• ' + m.name; });
+        return { lines: ['التخصصات الموجودة في دليل المستجدين:'].concat(all, ['', 'اسأليني عن مقررات أي تخصص، أو افتحي زر «دليل المستجدين» 🎓']),
+                 chips: (g.majors || []).slice(0, 2).map(function (m) { return 'مقررات ' + m.name; }) };
+      }
+      return { lines: ['🎓 ' + major.name + ' — ' + major.dept + '.', major.note, 'اسأليني عن مقرراته (مثل: مقررات ' + major.name + ' المستوى الثاني).'],
+               chips: ['مقررات ' + major.name + ' المستوى الأول'] };
+    }
+
+    // الدليل نفسه
+    if (/(دليل المستجد|دليل المستجدات|دليل الطالبه|دليل الطالبات)/.test(qn)) {
+      return { lines: ['🎓 «دليل المستجدين» فيه خطط التخصصات، وملخص الأنظمة واللوائح (الغياب، التقويم، الانسحاب، التخرج، قواعد السلوك)، وأسئلة شائعة. تلقين زره في الصفحة، وأقدر أجاوبك منه مباشرة، اسأليني.'],
+               chips: ['كم نسبة الغياب المسموحة؟', 'وش التخصصات؟'] };
+    }
+
+    // الأسئلة الشائعة
+    for (i = 0; i < (g.faq || []).length; i++) {
+      k = g.faq[i];
+      if (k.k && !(roomMatched && /(وين|فين|اوصل|اروح|موقع|مكان)/.test(qn)) &&
+          new RegExp('(^|\\s)(?:ال|وال|بال|لل|ب|و)?(' + k.k + ')').test(qn)) {
+        return { lines: [k.a, '📎 ' + k.s, 'للتفاصيل الكاملة افتحي زر «دليل المستجدين» 🎓'], chips: [] };
+      }
+    }
+    return null;
+  }
+
   /* ============================== فهم النية ============================== */
   var RE = {
     greet: /^(مرحبا|مرحبتين|هلا|هلا والله|اهلا|اهلين|السلام|سلام|الو|هاي|هلو|hi|hello|hey|صباح|مساء|يا هلا|حياك|حياكم)/,
@@ -835,8 +908,8 @@
       if (RE.thanks.test(qn)) { res.lines = [pick(['العفو، أي وقت! 🌷', 'حياك الله، أبشري بأي شي ثاني 🌸'])]; return res; }
       if (RE.bye.test(qn)) { res.lines = ['الله يحفظك، بالتوفيق! 🌟']; return res; }
       if (RE.help.test(qn)) {
-        res.lines = ['أنا مساعد مسار 🧭 أساعدك تعرفين وين المباني والقاعات في الكلية وش فيها، وأجاوب عن المدربات (مكتبها وإيميلها)، وأفهم لهجتك عادي.',
-                     'جربي: «وين مكتب العميدة؟» أو «مين نورة؟» أو «وش في مبنى A؟»'];
+        res.lines = ['أنا مساعد مسار 🧭 أساعدك تعرفين وين المباني والقاعات في الكلية وش فيها، وأجاوب عن المدربات (مكتبها وإيميلها)، وعن الأنظمة والخطط (دليل المستجدين)، وأفهم لهجتك عادي.',
+                     'جربي: «وين مكتب العميدة؟» أو «كم نسبة الغياب؟» أو «مقررات الوسائط المستوى الأول»'];
         res.chips = sampleChips();
         return res;
       }
@@ -886,6 +959,10 @@
       res.chips = sampleChips();
       return res;
     }
+
+    // 1.7) دليل المستجدين (الخطط والأنظمة) — فقط إذا ما ذُكر مكان/قاعة
+    var gd = guideAnswer(qn, m.accepted.length > 0);
+    if (gd) { res.lines = gd.lines; res.chips = gd.chips || []; return res; }
 
     // 2) مكان/أماكن محددة
     if (m.accepted.length) {
@@ -974,7 +1051,8 @@
     if (bld) chips.push('وش في ' + bld.display + '؟');
     if (leaf) chips.push('وين ' + leaf.display + '؟');
     if (getTrainers().length) chips.push('وش أسماء المدربات؟');
-    return chips.slice(0, 4);
+    if (getGuide()) chips.push('كم نسبة الغياب المسموحة؟');
+    return chips.slice(0, 5);
   }
 
   /* ================================ الواجهة ================================ */
@@ -1260,7 +1338,7 @@
     head.appendChild(el('div', 'mai-head-ico', ICONS.pin));
     var ht = el('div', 'mai-head-txt');
     ht.appendChild(el('p', 'mai-title', 'مساعد مسار'));
-    ht.appendChild(el('p', 'mai-sub', 'أساعدك في الكلية والتنقل · نسخة 3'));
+    ht.appendChild(el('p', 'mai-sub', 'أساعدك في الكلية والتنقل · نسخة 4'));
     head.appendChild(ht);
     var closeBtn = el('button', 'mai-close', ICONS.close);
     closeBtn.type = 'button';
