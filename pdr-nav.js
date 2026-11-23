@@ -19,7 +19,8 @@
     lpTau: 0.035,         // ث — تنعيم إشارة التسارع قبل كشف الذروة (يزيل الضجيج بدون تأخير ملحوظ)
     maxRotRate: 400,      // °/ث — تجاهل "خطوات" ناتجة عن تدوير الجوال بقوة باليد
     headWinMs: 300,       // نافذة متوسط الاتجاه عند كل خطوة (تلغي اهتزاز اليد)
-    glideFrac: 0.8,       // مدة انزلاق النقطة نحو الخطوة الجديدة كنسبة من زمن الخطوة (حركة متصلة)
+    glideFrac: 0.6,       // مدة انزلاق النقطة نحو الخطوة الجديدة كنسبة من زمن الخطوة (أقل = أسرع استجابة، أعلى = أنعم)
+    arrowSnap: true,      // أثناء المشي في ممر: السهم يميل لاتجاه الممر إذا قرب منه اتجاه الجوال (يلغي اهتزاز اليد)
     arrowTau: 0.05        // ث — تنعيم دوران السهم
   }, window.PDR_CONFIG || {});
   const FLOOR_ALIAS = { Ground: 'الدور الأرضي', First: 'الدور الأول', Second: 'الدور الثاني' };
@@ -206,7 +207,7 @@
   function startGlide() {
     if (!pos) return;
     if (!dpos) dpos = { x: pos.x, y: pos.y };
-    glide = { from: { x: dpos.x, y: dpos.y }, to: { x: pos.x, y: pos.y }, t0: performance.now(), dur: clamp(SD.avgInt * CFG.glideFrac, 140, 450) };
+    glide = { from: { x: dpos.x, y: dpos.y }, to: { x: pos.x, y: pos.y }, t0: performance.now(), dur: clamp(SD.avgInt * CFG.glideFrac, 110, 320) };
     kick();
   }
 
@@ -218,12 +219,18 @@
     const moved = move((strideM || CFG.strideM) * CFG.pxPerM, graphFor(posCtx.b, posCtx.f), posCtx.b, stepHeading(posCtx.b));
     if (moved) startGlide();
     if (matchesFloor()) {
-      if (moved) updateRoute();
-      render();
+      render();                       // ارسم النقطة أولاً ...
+      if (moved) scheduleRoute();     // ... ثم حدّث المسار بعد الرسم حتى لا يؤخر الإطار
     } else {
       hint('موقعك مسجّل في مبنى ' + posCtx.b + ' — ' + posCtx.f + '. إذا انتقلت لدور أو مبنى آخر امسح QR هناك لتحديث موقعك');
     }
     if (stepsEl) stepsEl.textContent = String(steps);
+  }
+
+  let routeQueued = false;
+  function scheduleRoute() {
+    if (routeQueued) return; routeQueued = true;
+    requestAnimationFrame(() => setTimeout(() => { routeQueued = false; updateRoute(); }, 0));
   }
 
   /* ---------- المسار من الموقع الحالي ---------- */
@@ -271,13 +278,19 @@
     const dt = Math.min(0.05, Math.max(0.001, (now - lastFrame) / 1000)); lastFrame = now;
     let busy = false;
     if (glide && dpos) {
-      const k = Math.min(1, (now - glide.t0) / glide.dur);
-      dpos.x = glide.from.x + (glide.to.x - glide.from.x) * k;
-      dpos.y = glide.from.y + (glide.to.y - glide.from.y) * k;
+      const k = Math.min(1, (now - glide.t0) / glide.dur), ke = 1 - (1 - k) * (1 - k); // ease-out: معظم الحركة في أول الخطوة فيقل التأخر المحسوس
+      dpos.x = glide.from.x + (glide.to.x - glide.from.x) * ke;
+      dpos.y = glide.from.y + (glide.to.y - glide.from.y) * ke;
       if (k >= 1) glide = null; else busy = true;
     }
     if (pos && posCtx) {
-      const ht = mapHeading();
+      let ht = mapHeading();
+      // أثناء المشي بخط مستقيم: اتجاه السهم يقترب من اتجاه الممر (لا يغيّر الاتجاه المستخدم في حساب الحركة)
+      if (CFG.arrowSnap && lastEdge && performance.now() - SD.lastStepT < 1200) {
+        const ea = (Math.atan2(lastSg * (lastEdge.b.x - lastEdge.a.x), -lastSg * (lastEdge.b.y - lastEdge.a.y)) * 180 / Math.PI + 360) % 360;
+        const dd = angDiff(ht, ea);
+        if (Math.abs(dd) < 30) ht = (ea + dd * 0.35 + 360) % 360;
+      }
       if (dH == null) dH = ht;
       else {
         const d = angDiff(ht, dH);
@@ -427,7 +440,7 @@
       const rr = e.rotationRate, rot = rr ? Math.hypot(rr.alpha || 0, rr.beta || 0, rr.gamma || 0) : 0;
       if (rot > CFG.maxRotRate) return;                           // تدوير الجوال باليد وليس مشياً
       const amp = SD.s1 - SD.vmin;
-      if (SD.lastStepT && iv < 2000) SD.avgInt = SD.avgInt * 0.7 + iv * 0.3;
+      if (SD.lastStepT && iv < 2000) SD.avgInt = clamp(SD.avgInt * 0.7 + clamp(iv, SD.avgInt * 0.6, SD.avgInt * 1.6) * 0.3, 250, 1000); // خطوة فائتة أو وقفة لا تشوّه المعدل
       SD.lastStepT = t; SD.armed = false; SD.vmin = s;
       onStep(strideFor(amp));
     }
@@ -455,7 +468,7 @@
       hBuf.push({ t: now, h: mapHeadingFor(posCtx.b) });
       while (hBuf.length && now - hBuf[0].t > 1000) hBuf.shift();
     }
-    render();
+    kick(); // الرسم يتم مرة واحدة لكل إطار داخل frame() بدل كتابة DOM عند كل حدث مستشعر (60 مرة/ث × حدثين في أندرويد)
   }
   async function toggleTracking() {
     if (tracking) {
