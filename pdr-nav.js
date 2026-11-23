@@ -9,8 +9,9 @@
     strideM: 0.7,         // طول الخطوة بالمتر
     snapR: 12,            // نصف قطر البحث عن الممر
     minAlign: 0.35,       // أقل توافق بين اتجاه المشي واتجاه الممر
-    stepMinMs: 320,       // أقل زمن بين خطوتين
-    stepThresh: 1.2,      // حساسية كشف الخطوة (م/ث²)
+    stepMinMs: 280,       // أقل زمن بين خطوتين
+    stepThresh: 1.2,      // أعلى حد لعتبة كشف الخطوة (م/ث²) — العتبة تتكيّف تحتها تلقائياً
+    stepThreshMin: 0.6,   // أقل حد لعتبة كشف الخطوة (ارفعيه إذا صارت خطوات وهمية وأنتِ واقفة)
     joinTol: 14,          // مسافة ربط الخطوط ببعض
     arriveR: 18,          // مسافة الوصول (بكسل)
     buildingNorth: { A: 0, B: 0 } // اتجاه "أعلى الخريطة" بالنسبة للشمال (درجات) لكل مبنى
@@ -21,7 +22,7 @@
   let tracking = false, devHeading = null, pendingH = null, steps = 0;
   let relHeading = null;   // اتجاه الجايرو (لا يتأثر بالمغناطيس) — مرجعه عشوائي لكنه ثابت أثناء التتبع
   const gyroOff = {};      // بعد المعايرة: فرق الجايرو عن اتجاه الخريطة لكل مبنى (في الذاكرة فقط، لا يُحفظ)
-  let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0;
+  let lastStepT = 0, avg = 9.8, d1 = 0, d2 = 0, lastHint = 0, sm = 0, peakAvg = 1.5;
   let markerEl, arrowEl, stepsEl, trackBtn;
 
   /* معايرة الاتجاه لكل مبنى (تُحفظ في الجهاز حتى لا تُعاد كل مرة) */
@@ -334,8 +335,11 @@
     if (!a || a.x == null) return;
     const m = Math.hypot(a.x, a.y, a.z);
     avg = avg * 0.9 + m * 0.1;
-    const d = m - avg, t = performance.now();
-    if (d1 > CFG.stepThresh && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { lastStepT = t; onStep(); }
+    sm = sm * 0.4 + (m - avg) * 0.6;           // تنعيم خفيف يسمح بعتبة أقل بدون خطوات وهمية
+    const d = sm, t = performance.now();
+    if (t - lastStepT > 1500) peakAvg = 1.5;    // وقفتِ مدة: ارجع لحساسية البداية (الخطوات الأولى ضعيفة)
+    const thr = Math.max(CFG.stepThreshMin, Math.min(CFG.stepThresh, peakAvg * 0.45)); // عتبة تتكيّف مع قوة مشيك
+    if (d1 > thr && d1 >= d2 && d1 > d && t - lastStepT > CFG.stepMinMs) { peakAvg = peakAvg * 0.7 + d1 * 0.3; lastStepT = t; onStep(); }
     d2 = d1; d1 = d;
   }
   function onOri(e) {
