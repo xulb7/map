@@ -20,6 +20,9 @@
     maxRotRate: 400,      // °/ث — تجاهل "خطوات" ناتجة عن تدوير الجوال بقوة باليد
     headWinMs: 300,       // نافذة متوسط الاتجاه عند كل خطوة (تلغي اهتزاز اليد)
     glideFrac: 0.6,       // مدة انزلاق النقطة نحو الخطوة الجديدة كنسبة من زمن الخطوة (أقل = أسرع استجابة، أعلى = أنعم)
+    predictFrac: 0.8,     // تنبّؤ: تستمر النقطة بالتحرك بسرعتك المقدّرة بين الخطوات حتى هذه النسبة من زمن الخطوة (0 = بدون تنبّؤ)
+    detectLagMs: 50,      // مللي ث — تأخر اكتشاف الخطوة (تنعيم + انتظار الذروة) يُعوَّض في العرض
+    catchTauMs: 100,      // مللي ث — سرعة تصحيح النقطة المعروضة عند وصول الخطوة الحقيقية
     arrowSnap: true,      // أثناء المشي في ممر: السهم يميل لاتجاه الممر إذا قرب منه اتجاه الجوال (يلغي اهتزاز اليد)
     arrowTau: 0.05        // ث — تنعيم دوران السهم
   }, window.PDR_CONFIG || {});
@@ -204,10 +207,19 @@
     if (Math.hypot(sx, sy) / w.length < 0.9) return cur;
     return (Math.atan2(sx, sy) * 180 / Math.PI + 360) % 360;
   }
-  function startGlide() {
+  // عرض تنبّؤي: الموقع المعروض = آخر موقع مؤكد + سرعة المشي × الزمن المنقضي منذ الخطوة (بدل الانتظار الثابت ثم القفز)
+  // وعند وصول الخطوة التالية يُصحَّح الفرق تدريجياً (catchTauMs) فلا تظهر قفزات.
+  function startGlide(prev) {
     if (!pos) return;
+    const now = performance.now();
     if (!dpos) dpos = { x: pos.x, y: pos.y };
-    glide = { from: { x: dpos.x, y: dpos.y }, to: { x: pos.x, y: pos.y }, t0: performance.now(), dur: clamp(SD.avgInt * CFG.glideFrac, 110, 320) };
+    const I = SD.avgInt, pf = CFG.predictFrac;
+    const vx = prev && pf > 0 ? (pos.x - prev.x) / I : 0, vy = prev && pf > 0 ? (pos.y - prev.y) / I : 0; // بكسل/مللي ث
+    const lag = Math.min(CFG.detectLagMs, I * 0.2);
+    glide = {
+      base: { x: pos.x, y: pos.y }, vx, vy, t0: now - lag, te: now, cap: I * pf,
+      ex: dpos.x - (pos.x + vx * lag), ey: dpos.y - (pos.y + vy * lag)       // فرق الاستمرارية عند لحظة التحديث
+    };
     kick();
   }
 
@@ -216,8 +228,10 @@
     if (devHeading == null && relHeading == null) { hint('بانتظار قراءة البوصلة… حرّك الجوال حركة رقم 8'); return; }
     steps++;
     // التتبع يستمر على دور/مبنى المستخدم حتى لو كان يتصفح خريطة غيره
+    const before = { x: pos.x, y: pos.y };
     const moved = move((strideM || CFG.strideM) * CFG.pxPerM, graphFor(posCtx.b, posCtx.f), posCtx.b, stepHeading(posCtx.b));
-    if (moved) startGlide();
+    if (moved) startGlide(before);
+    else if (dpos && dist(dpos, pos) > 1) startGlide(null);     // جدار/نهاية ممر: أعد النقطة المعروضة للموقع الفعلي بنعومة
     if (matchesFloor()) {
       render();                       // ارسم النقطة أولاً ...
       if (moved) scheduleRoute();     // ... ثم حدّث المسار بعد الرسم حتى لا يؤخر الإطار
@@ -278,10 +292,10 @@
     const dt = Math.min(0.05, Math.max(0.001, (now - lastFrame) / 1000)); lastFrame = now;
     let busy = false;
     if (glide && dpos) {
-      const k = Math.min(1, (now - glide.t0) / glide.dur), ke = 1 - (1 - k) * (1 - k); // ease-out: معظم الحركة في أول الخطوة فيقل التأخر المحسوس
-      dpos.x = glide.from.x + (glide.to.x - glide.from.x) * ke;
-      dpos.y = glide.from.y + (glide.to.y - glide.from.y) * ke;
-      if (k >= 1) glide = null; else busy = true;
+      const el = Math.min(now - glide.t0, glide.cap), dec = Math.exp(-(now - glide.te) / CFG.catchTauMs);
+      dpos.x = glide.base.x + glide.vx * el + glide.ex * dec;
+      dpos.y = glide.base.y + glide.vy * el + glide.ey * dec;
+      if (now - glide.t0 >= glide.cap && dec < 0.02) glide = null; else busy = true;
     }
     if (pos && posCtx) {
       let ht = mapHeading();
